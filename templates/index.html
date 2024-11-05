@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Hiding in Image</title>
+    <link rel="icon" href="assets/rnr.jpeg"  type="image/jpeg">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #000000; /* Black background */
+            margin: 0;
+            padding: 20px;
+            color: #ffffff; /* White text for body */
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            background: #ffffff; /* White background for the container */
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2); /* Soft shadow */
+        }
+        h1, h2 {
+            text-align: center;
+            color: #000000; /* Black text for headings */
+            margin-bottom: 20px;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        input[type="file"] {
+            padding: 10px;
+            border: 1px solid #000000; /* Black border */
+            border-radius: 4px;
+            font-size: 16px;
+            background-color: #ffffff; /* White background */
+            color: #000000; /* Black text */
+            transition: border-color 0.3s;
+        }
+        input[type="file"]:focus {
+            border-color: #444444; /* Dark gray on focus */
+            outline: none; /* Remove default outline */
+        }
+        button {
+            padding: 10px;
+            background-color: #000000; /* Black button background */
+            color: #ffffff; /* White text */
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #444444; /* Dark gray on hover */
+        }
+        .upload-section {
+            margin-bottom: 40px;
+        }
+        .error-message {
+            color: #ff0000; /* Red for error messages */
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-align: center; /* Center error messages */
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 15px; /* Reduce padding on small screens */
+            }
+            button {
+                font-size: 14px; /* Smaller button text on small screens */
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hide Files in Image</h1>
+        <div class="upload-section">
+            <form action="/upload" method="post" enctype="multipart/form-data">
+                <input type="file" name="image" accept="image/*" required>
+                <input type="file" name="file" accept=".txt,.pdf,.mp4,.jpg,.png" required>
+                <div class="error-message" id="upload-error"></div>
+                <button type="submit">Upload and Hide</button>
+            </form>
+        </div>
+
+        <h2>Extract Hidden File from Image</h2>
+        <form action="/extract" method="post" enctype="multipart/form-data">
+            <input type="file" name="image" accept="image/*" required>
+            <div class="error-message" id="extract-error"></div>
+            <button type="submit">Extract Hidden File</button>
+        </form>
+    </div>
+
+    <script>
+        const uploadForm = document.querySelector('form[action="/upload"]');
+        const extractForm = document.querySelector('form[action="/extract"]');
+        const uploadError = document.getElementById('upload-error');
+        const extractError = document.getElementById('extract-error');
+
+        uploadForm.addEventListener('submit', (e) => {
+            const imageInput = uploadForm.querySelector('input[name="image"]');
+            const fileInput = uploadForm.querySelector('input[name ="file"]');
+
+            if (!imageInput.value || !fileInput.value) {
+                e.preventDefault();
+                uploadError.textContent = 'Please select both an image and a file to hide.';
+            }
+        });
+
+        extractForm.addEventListener('submit', (e) => {
+            const imageInput = extractForm.querySelector('input[name="image"]');
+
+            if (!imageInput.value) {
+                e.preventDefault();
+                extractError.textContent = 'Please select an image with a hidden file.';
+            }
+        });
+    </script>
+     
+    </div> <!-- Closing tag for the container -->
+    
+      <div class="description" style="background-color: #222222; color: #ffffff; padding: 15px; border-radius: 8px; text-align: center; margin-top: 20px;">
+          <p style="margin: 0;">Rolan has created this tool to enable users to hide files within images, providing a simple and effective way to secure sensitive information. This innovative approach allows for the concealment of various file types, ensuring privacy and security.</p>
+      </div>
+</body>
+</html>
