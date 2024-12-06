@@ -40,11 +40,11 @@ Open your browser and navigate to:
 http://127.0.0.1:5000
 
 ## 🎯 How to Use
--1️⃣ **Hiding a File:
+- 1️⃣ **Hiding a File:
 Upload an image (.png, .jpg, .jpeg, etc.).
 Upload the file you want to embed.
 Click "Hide File" to download the modified image with the hidden file.
--2️⃣ **Extracting a File:
+- 2️⃣ **Extracting a File:
 Upload an image containing the hidden file.
 Click "Extract File" to download the file in its original format.
 
