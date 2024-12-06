@@ -57,7 +57,7 @@ InvisioVault/
 ├── requirements.txt  # Dependencies list
 ├── README.md         # Project documentation
 └── app.log           # Application logs
-🌐 Deployment Options
+##🌐 Deployment Options
 You can deploy InvisioVault for free using these platforms:
 
 Render (Recommended)
@@ -73,7 +73,7 @@ Backend: Flask (Python)
 Frontend: HTML, CSS
 Image Processing: PIL (Pillow Library)
 Compression: zlib
-🖋️ Contributions
+##🖋️ Contributions
 Contributions are welcome! Here's how you can contribute:
 
 Fork the repository.
@@ -81,10 +81,10 @@ Create a new branch for your feature (git checkout -b feature-name).
 Commit your changes (git commit -m 'Add feature-name').
 Push to your branch (git push origin feature-name).
 Open a Pull Request.
-📄 License
+##📄 License
 This project is licensed under the MIT License. See the LICENSE file for details.
 
-✉️ Contact
+##✉️ Contact
 Have questions or suggestions? Reach out to me:
 
 Email: rolanlobo901@gmail.com
