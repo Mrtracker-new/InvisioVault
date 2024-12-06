@@ -26,17 +26,13 @@ Ensure you have the following installed:
    ```bash
    git clone https://github.com/Mrtracker-new/InvisioVault.git
    cd InvisioVault
-Install Dependencies:
+**Install Dependencies**:
 
-bash
-Copy code
-pip install -r requirements.txt
-Run the Application:
+    pip install -r requirements.txt
+**Run the Application**:
 
-bash
-Copy code
-python app.py
-Open your browser and navigate to:
+    python app.py
+**Open your browser and navigate to**:
 http://127.0.0.1:5000
 
 ## 🎯 How to Use
