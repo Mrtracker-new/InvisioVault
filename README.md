@@ -51,8 +51,7 @@ Click "Extract File" to download the file in its original format.
 ---
 
 ## 🗂️ Project Structure
-bash
-**Copy code**:
+**Structure**:
 
       InvisioVault/
     ├── uploads/          # Temporary storage for uploaded files
