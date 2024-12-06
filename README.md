@@ -109,7 +109,8 @@ Got questions or feedback? Reach out to me:
 
 - **Email: rolanlobo901@gmail.com.**
 - **GitHub: Mrtracker-new.**
-## **Disclaimer**: InvisioVault is intended for educational and personal use. Always ensure ethical and legal compliance when embedding sensitive files.
+## Disclaimer: 
+**InvisioVault is intended for educational and personal use. Always ensure ethical and legal compliance when embedding sensitive files**.
 
 ---
 
