@@ -80,6 +80,7 @@ def hide_file_in_image(image_path, file_path):
 
 
 
+
 # Extract file from image
 def extract_file_from_image(image_path):
     """Extract a hidden file from an image, including its metadata."""
@@ -110,6 +111,7 @@ def extract_file_from_image(image_path):
 
     # Return extracted file data and metadata
     return decompressed_data, original_filename, mime_type
+
 
 
 @app.route('/')
@@ -169,12 +171,17 @@ def extract_file():
         image.save(image_path)
 
         # Extract file from image
-        file_data = extract_file_from_image(image_path)
+        file_data, original_filename, mime_type = extract_file_from_image(image_path)
 
         # Send extracted file
         output = BytesIO(file_data)
         output.seek(0)
-        return send_file(output, as_attachment=True, download_name='extracted_file', mimetype='application/octet-stream')
+        return send_file(
+            output,
+            as_attachment=True,
+            download_name=original_filename,
+            mimetype=mime_type
+        )
 
     except Exception as e:
         logging.error(f"Error during extraction: {e}")
