@@ -50,7 +50,7 @@ Click "Extract File" to download the file in its original format.
 
 ---
 
-##🗂️ Project Structure
+## 🗂️ Project Structure
 bash
 Copy code
 InvisioVault/
