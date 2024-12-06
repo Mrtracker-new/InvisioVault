@@ -53,8 +53,7 @@ Click "Extract File" to download the file in its original format.
 ## 🗂️ Project Structure
 bash
 **Copy code**:
-    ````baash
-      
+
       InvisioVault/
     ├── uploads/          # Temporary storage for uploaded files
     ├── templates/        # HTML templates for the web interface
