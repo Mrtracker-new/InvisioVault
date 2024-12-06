@@ -40,11 +40,11 @@ Open your browser and navigate to:
 http://127.0.0.1:5000
 
 ## 🎯 How to Use
-1️⃣ Hiding a File:
+-1️⃣ **Hiding a File:
 Upload an image (.png, .jpg, .jpeg, etc.).
 Upload the file you want to embed.
 Click "Hide File" to download the modified image with the hidden file.
-2️⃣ Extracting a File:
+-2️⃣ **Extracting a File:
 Upload an image containing the hidden file.
 Click "Extract File" to download the file in its original format.
 
@@ -66,14 +66,14 @@ Click "Extract File" to download the file in its original format.
 ## 🌍 Deployment Options
 You can easily deploy InvisioVault on free hosting platforms like:
 
-Render
-Heroku
-Replit
-PythonAnywhere
-Quick Deployment Steps
-Push the project to your GitHub repository.
-Follow the platform-specific deployment guide.
-Configure the app for production use.
+**Render
+**Heroku
+**Replit
+**PythonAnywhere
+**Quick Deployment Steps
+-**Push the project to your GitHub repository.
+-**Follow the platform-specific deployment guide.
+-**Configure the app for production use.
 
 ---
 
@@ -85,10 +85,10 @@ Free to Use and Customize: Open-source and MIT-licensed.
 ---
 
 ## 👨‍💻 Built With
-Backend: Flask (Python)
-Frontend: HTML, CSS
-Image Processing: PIL (Pillow Library)
-Compression: zlib
+**Backend: Flask (Python)
+**Frontend: HTML, CSS
+**Image Processing: PIL (Pillow Library)
+**Compression: zlib
 
 ---
 
