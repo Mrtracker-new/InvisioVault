@@ -52,14 +52,16 @@ Click "Extract File" to download the file in its original format.
 
 ## 🗂️ Project Structure
 bash
-Copy code
-InvisioVault/
-├── uploads/          # Temporary storage for uploaded files
-├── templates/        # HTML templates for the web interface
-├── app.py            # Main Flask application
-├── requirements.txt  # List of dependencies
-├── README.md         # Project documentation
-└── app.log           # Application logs
+**Copy code**:
+    ````baash
+      
+      InvisioVault/
+    ├── uploads/          # Temporary storage for uploaded files
+    ├── templates/        # HTML templates for the web interface
+    ├── app.py            # Main Flask application
+    ├── requirements.txt  # List of dependencies
+    ├── README.md         # Project documentation
+    └── app.log           # Application logs
 
 ---
 
