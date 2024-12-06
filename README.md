@@ -1,68 +1,82 @@
 # InvisioVault
-This is a Flask-based web application for file steganography, where users can hide a file within an image or extract a hidden file from an image. By embedding file data into the least significant bits of an image, this application provides a secure and easy-to-use platform for hiding and retrieving files within images.
 
-# Image File Steganography Web Application
+InvisioVault is a Flask-based web application that allows users to securely hide any type of file (PDFs, videos, documents, etc.) inside an image. The application compresses files before embedding, enabling it to handle larger files effectively. Hidden files can be extracted later and downloaded in their original format.
 
-This project is a Flask-based web application that enables users to hide files within images and extract hidden files from images. It uses the least significant bit (LSB) technique to embed file data into the pixels of a host image.
+---
 
 ## Features
+- **File Compression**: Efficiently compresses hidden files to maximize storage capacity.
+- **File Support**: Supports hiding and extracting any file type, including `.pdf`, `.mp4`, `.txt`, `.apk`, and more.
+- **User-Friendly Interface**: Simple upload/download functionality for both embedding and extraction.
+- **Security**: Implements Content Security Policy (CSP) headers for enhanced security.
 
-- **File Hiding**: Upload an image and a file to hide, and the app will embed the file within the image using the LSB method.
-- **File Extraction**: Upload an image with a hidden file, and the app will extract and download the embedded file.
-- **File Validation**: Ensures valid image and file formats for both upload and extraction operations.
-- **Error Handling**: Provides user-friendly error messages for invalid formats, large files, or unexpected errors.
-- **Logging**: Logs upload and extraction attempts for debugging purposes.
+---
 
-## Requirements
+## Installation and Setup
 
-- Python 3.x
-- Flask
-- PIL (Pillow library)
+Follow the steps below to run InvisioVault locally.
 
-## Installation
+### Prerequisites
+- Python 3.8 or higher
+- pip (Python package manager)
 
-1. Clone the repository:
-    ```bash
-    git clone https://github.com/Mrtracker-new/image-steganography.git
-    cd image-steganography
-    ```
+### Clone the Repository
+```bash
+git clone https://github.com/Mrtracker-new/InvisioVault.git
+cd InvisioVault
+Install Dependencies
+Use the following command to install the required Python packages:
 
-2. Install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
+bash
+Copy code
+pip install -r requirements.txt
+Run the Application
+bash
+Copy code
+python app.py
+The app will run on http://127.0.0.1:5000. Open this URL in your browser to use the application.
 
-3. Run the application:
-    ```bash
-    python app.py
-    ```
+Usage
+Hide a File in an Image:
 
-4. Visit `http://127.0.0.1:5000` in your browser to use the application.
+Upload an image (e.g., .png, .jpg) and the file you want to hide.
+InvisioVault will embed the file into the image and provide a downloadable output image.
+Extract a File from an Image:
 
-## Usage
+Upload the image containing the hidden file.
+InvisioVault will extract and decompress the file, offering it for download in its original format.
+Folder Structure
+bash
+Copy code
+<project-root>
+├── uploads/          # Temporary folder for storing uploaded files
+├── templates/        # HTML files for the web interface
+├── app.py            # Main Flask application
+├── requirements.txt  # List of dependencies
+├── README.md         # Project description
+└── app.log           # Application log file
+Deployment
+You can deploy InvisioVault for free on platforms like:
 
-1. **Hide File in Image**:
-   - Go to the homepage.
-   - Upload an image (PNG, JPEG, BMP) and a file to hide (supports common formats).
-   - Click "Upload" to generate an image with the hidden file.
-   
-2. **Extract File from Image**:
-   - Go to the "Extract" page.
-   - Upload an image that contains hidden data.
-   - The hidden file will be extracted and made available for download.
+Render
+Heroku
+Replit
+PythonAnywhere
+Refer to the respective platform's documentation for detailed steps.
 
-## Folder Structure
+Technologies Used
+Backend: Flask (Python)
+Frontend: HTML, CSS
+Compression: zlib library
+Image Processing: PIL (Python Imaging Library)
+Contributing
+Feel free to fork this repository and submit pull requests. Contributions are welcome!
 
-- `uploads/` - Stores the uploaded and processed files.
-- `templates/` - Contains HTML templates for the application.
-- `app.log` - Log file for tracking errors and user activity.
+License
+This project is licensed under the MIT License. See the LICENSE file for details.
 
-## Security Considerations
+Contact
+For queries or support, feel free to reach out:
 
-- Maximum file size for uploads is set to 16MB to prevent large files from overloading the server.
-- Supported file types for hiding are validated for security.
-- Cleanup function deletes temporary files after processing to optimize storage and security.
-
-## License
-
-This project is licensed under the MIT License.
+Email: rolanlobo901@gmail.com
+GitHub: Mrtracker-new
