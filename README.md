@@ -81,21 +81,21 @@ You can easily deploy InvisioVault on free hosting platforms like:
 ---
 
 ## 👨‍💻 Built With
-**Backend**: Flask (Python)
-**Frontend**: HTML, CSS
-**Image Processing**: PIL (Pillow Library)
-**Compression: zlib**
+- **Backend**: Flask (Python)
+- **Frontend**: HTML, CSS
+- **Image Processing**: PIL (Pillow Library)
+- **Compression: zlib**
 
 ---
 
 ## 🤝 Contributing
 Contributions are welcome! Follow these steps to get involved:
 
-Fork this repository.
-Create a new branch (git checkout -b feature-name).
-Make your changes and commit (git commit -m 'Add feature-name').
-Push the branch (git push origin feature-name).
-Open a Pull Request for review.
+*Fork this repository**.
+- Create a new branch (git checkout -b feature-name).
+- Make your changes and commit (git commit -m 'Add feature-name').
+- Push the branch (git push origin feature-name).
+- Open a Pull Request for review.
 
 ---
 
@@ -107,8 +107,8 @@ This project is licensed under the MIT License. Feel free to use, modify, and di
 ## 📬 Contact
 Got questions or feedback? Reach out to me:
 
-**Email: rolanlobo901@gmail.com.**
-**GitHub: Mrtracker-new.**
+- **Email: rolanlobo901@gmail.com.**
+- **GitHub: Mrtracker-new.**
 Disclaimer: InvisioVault is intended for educational and personal use. Always ensure ethical and legal compliance when embedding sensitive files.
 
 ---
