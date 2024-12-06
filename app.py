@@ -1,16 +1,17 @@
-from flask import Flask, request, render_template, send_file
+from flask import Flask, request, render_template, send_file, make_response, g
 from PIL import Image
 import os
 import logging
 import zlib
-import random
-import string
+import secrets
+from io import BytesIO
+import mimetypes
 
 # Configuration
 UPLOAD_FOLDER = 'uploads/'
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB limit for uploads
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64 MB limit for uploads
 
 # Create uploads folder if it doesn't exist
 if not os.path.exists(UPLOAD_FOLDER):
@@ -19,152 +20,132 @@ if not os.path.exists(UPLOAD_FOLDER):
 # Logging configuration
 logging.basicConfig(filename='app.log', level=logging.INFO)
 
-# File type validation
-def validate_file(file):
-    if file is None:
-        raise ValueError("No file uploaded.")
 
-    if not file.filename or file.filename.strip() == '':
-        raise ValueError("No file uploaded.")
-
-    if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.apk', '.zip', '.rar')):
-        raise ValueError("Unsupported file format.")
+# Helper function to validate file type
+def validate_file(file, allowed_extensions):
+    if not file:
+        raise ValueError("No file provided.")
+    if '.' not in file.filename or file.filename.split('.')[-1].lower() not in allowed_extensions:
+        raise ValueError(f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}")
 
 
-# Function to hide file in image
+# Hide file in image
 def hide_file_in_image(image_path, file_path):
+    """Hide a file in an image, including its metadata."""
     # Open the host image
-    """
-    Hide a file in an image by modifying the least significant bits of each pixel.
-
-    Args:
-        image_path (str): The path to the host image.
-        file_path (str): The path to the file to hide.
-
-    Returns:
-        str: The path to the modified image.
-
-    Raises:
-        ValueError: If the host image does not have enough capacity to store this data.
-    """
-    
     host_img = Image.open(image_path).convert("RGB")
     host_pixels = list(host_img.getdata())
     total_pixels = len(host_pixels)
 
-    # Read the file to hide
+    # Read the file to hide and compress it
     with open(file_path, 'rb') as f:
         file_data = f.read()
-        
-    # Compress the file data
     compressed_data = zlib.compress(file_data)
 
-   # Prepare the data to hide: store file length and compressed data
-    data_to_hide = len(compressed_data).to_bytes(4, 'big') + compressed_data
+    # Get original filename and MIME type
+    original_filename = os.path.basename(file_path)
+    mime_type = mimetypes.guess_type(file_path)[0] or 'application/octet-stream'
+
+    # Prepare metadata
+    metadata = f"{original_filename}|{mime_type}".encode('utf-8')
+    metadata_length = len(metadata).to_bytes(2, 'big')  # Store metadata length as 2 bytes
+
+    # Combine metadata and compressed data
+    data_to_hide = metadata_length + metadata + compressed_data
 
     # Check image capacity
-    if len(data_to_hide) * 8 > total_pixels * 3:  # Each pixel can store 3 bits
-        raise ValueError("Host image does not have enough capacity to store this data.")
+    if len(data_to_hide) * 8 > total_pixels * 3:
+        raise ValueError("Host image does not have enough capacity to store the data.")
 
-    # Embed data in pixels
+    # Embed data into the image
     data_index = 0
     bit_index = 0
-    for pixel_index in range(total_pixels):
-        pixel = list(host_pixels[pixel_index])
-        for channel_index in range(3):
+    for i, pixel in enumerate(host_pixels):
+        pixel = list(pixel)
+        for channel in range(3):
             if data_index < len(data_to_hide):
                 byte = data_to_hide[data_index]
-                pixel[channel_index] = (pixel[channel_index] & ~1) | ((byte >> (7 - bit_index)) & 1)
+                pixel[channel] = (pixel[channel] & ~1) | ((byte >> (7 - bit_index)) & 1)
                 bit_index += 1
                 if bit_index == 8:
                     bit_index = 0
                     data_index += 1
-        host_pixels[pixel_index] = tuple(pixel)
+        host_pixels[i] = tuple(pixel)
 
     # Save the modified image
+    output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'output_image.png')
     host_img.putdata(host_pixels)
-    output_image_path = os.path.join(os.path.dirname(image_path), 'output_image.png')
-    host_img.save(output_image_path)
-    return output_image_path
+    host_img.save(output_path)
+    return output_path
 
-# Function to extract file from image
+
+
+# Extract file from image
 def extract_file_from_image(image_path):
-     
-     # Open the image
+    """Extract a hidden file from an image, including its metadata."""
+    # Open the image
     img = Image.open(image_path)
     pixels = list(img.getdata())
 
-
-     # Extract the data from the image
-    data = ''
+    # Extract binary data
+    data_bits = []
     for pixel in pixels:
         for channel in pixel:
-            data += str(channel & 1)
+            data_bits.append(channel & 1)
+    data_bytes = bytearray()
+    for i in range(0, len(data_bits), 8):
+        byte = 0
+        for bit in data_bits[i:i + 8]:
+            byte = (byte << 1) | bit
+        data_bytes.append(byte)
 
-  # Convert the binary data to bytes
-    data_bytes = bytes([int(data[i:i+8], 2) for i in range(0, len(data), 8)])
+    # Parse metadata length and metadata
+    metadata_length = int.from_bytes(data_bytes[:2], 'big')
+    metadata = data_bytes[2:2 + metadata_length].decode('utf-8')
+    original_filename, mime_type = metadata.split('|')
 
-    # Extract the file length and compressed data
-    file_length = int.from_bytes(data_bytes[:4], 'big')
-    compressed_data = data_bytes[4:]
-
-    # Decompress the data
+    # Extract compressed data
+    compressed_data = bytes(data_bytes[2 + metadata_length:])
     decompressed_data = zlib.decompress(compressed_data)
 
-    # Save the decompressed data to a file
-    with open('extracted_file', 'wb') as f:
-        f.write(decompressed_data)
+    # Return extracted file data and metadata
+    return decompressed_data, original_filename, mime_type
 
-    return 'extracted_file'
-# Clean up temporary files
-def cleanup_files(*file_paths):
-    for file_path in file_paths:
-        if file_path and os.path.exists(file_path):  # Check if file_path is not None
-            os.remove(file_path)
 
-# Flask routes
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    logging.info("File upload initiated.")
-    image_path = None
-    file_path = None  # Initialize file_path to None
     try:
         image = request.files.get('image')
         file_to_hide = request.files.get('file')
 
-        if not image or not file_to_hide:
-            raise ValueError("Both image and file to hide must be provided.")
-        
-        # Validate file formats
-        validate_file(image)  # Corrected to use the image directly
-        
-        # Save uploaded files
+        # Validate files
+        validate_file(image, ['png', 'jpg', 'jpeg', 'bmp'])
+        validate_file(file_to_hide, ['txt', 'pdf', 'mp4', 'apk', 'zip'])
+
+        # Save files
         image_path = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file_to_hide.filename)
         image.save(image_path)
         file_to_hide.save(file_path)
 
-        # Hide the file in the image
+        # Hide file in the image
         output_image_path = hide_file_in_image(image_path, file_path)
+
         return render_template('result.html', image_path=output_image_path)
-    
-    except ValueError as e:
-        logging.error("Validation error: %s", str(e))
-        return render_template('error.html', error_message=str(e)), 400
+
     except Exception as e:
-        logging.error("Unexpected error occurred: %s", str(e))
-        return render_template('error.html', error_message="An unexpected error occurred."), 500
-    finally:
-        cleanup_files(image_path, file_path)  # This will now work even if file_path is None
-
-
+        logging.error(f"Error during upload: {e}")
+        return render_template('error.html', error_message=str(e))
+    
 @app.route('/assets')
 def download_hidden_file():
-    # Generate a random filename
-    filename = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+      # Generate a random filename using secrets module
+    filename = secrets.token_urlsafe(16)
     
     # Assuming the hidden file is stored in the 'uploads' folder
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'output_image.png')
@@ -175,35 +156,30 @@ def download_hidden_file():
     # Send the file with the random filename
     return send_file(os.path.join(app.config['UPLOAD_FOLDER'], f'{filename}.png'), as_attachment=True)
 
+
+
 @app.route('/extract', methods=['POST'])
 def extract_file():
-    logging.info("File extraction initiated.")
-    image_path = None
     try:
         image = request.files.get('image')
+        validate_file(image, ['png', 'jpg', 'jpeg', 'bmp'])
 
-        if not image:
-            raise ValueError("An image file must be provided.")
-
-        # Validate file format
-        validate_file(image.filename, ['.png', '.jpg', '.jpeg'])
-
-        # Save uploaded image
+        # Save image
         image_path = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
         image.save(image_path)
 
-        # Extract hidden file
-        extracted_file_path = extract_file_from_image(image_path)
-        return send_file(extracted_file_path, as_attachment=True)
-    
-    except ValueError as e:
-        logging.error("Validation error: %s", str(e))
-        return render_template('error.html', error_message=str(e)), 400
+        # Extract file from image
+        file_data = extract_file_from_image(image_path)
+
+        # Send extracted file
+        output = BytesIO(file_data)
+        output.seek(0)
+        return send_file(output, as_attachment=True, download_name='extracted_file', mimetype='application/octet-stream')
+
     except Exception as e:
-        logging.error("Unexpected error occurred: %s", str(e))
-        return render_template('error.html', error_message="An unexpected error occurred."), 500
-    finally:
-        cleanup_files(image_path)
+        logging.error(f"Error during extraction: {e}")
+        return render_template('error.html', error_message=str(e))
+
 
 if __name__ == '__main__':
     app.run(debug=True)
