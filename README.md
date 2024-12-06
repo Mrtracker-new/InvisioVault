@@ -74,9 +74,9 @@ You can easily deploy InvisioVault on free hosting platforms like:
 ---
 
 ## 💡 Why Choose InvisioVault?
-Innovation Meets Simplicity: Hide files creatively while ensuring simplicity in use.
-Lightweight Yet Powerful: A compact Flask application that punches above its weight.
-Free to Use and Customize: Open-source and MIT-licensed.
+- Innovation Meets Simplicity: Hide files creatively while ensuring simplicity in use.
+- Lightweight Yet Powerful: A compact Flask application that punches above its weight.
+- Free to Use and Customize: Open-source and MIT-licensed.
 
 ---
 
