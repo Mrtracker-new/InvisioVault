@@ -8,7 +8,7 @@ from io import BytesIO
 import mimetypes
 
 # Configuration
-UPLOAD_FOLDER = '/tmp/uploads'
+UPLOAD_FOLDER = '/tmp/uploads'  # Vercel writable directory
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64 MB limit for uploads
@@ -18,7 +18,7 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 # Logging configuration
-logging.basicConfig(filename='app.log', level=logging.INFO)
+logging.basicConfig(filename='/tmp/app.log', level=logging.INFO)  # Use /tmp for logging on Vercel
 
 
 # Helper function to validate file type
@@ -79,8 +79,6 @@ def hide_file_in_image(image_path, file_path):
     return output_path
 
 
-
-
 # Extract file from image
 def extract_file_from_image(image_path):
     """Extract a hidden file from an image, including its metadata."""
@@ -113,7 +111,6 @@ def extract_file_from_image(image_path):
     return decompressed_data, original_filename, mime_type
 
 
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -129,7 +126,7 @@ def upload_file():
         validate_file(image, ['png', 'jpg', 'jpeg', 'bmp'])
         validate_file(file_to_hide, ['txt', 'pdf', 'mp4', 'apk', 'zip'])
 
-        # Save files
+        # Save files to /tmp/uploads
         image_path = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file_to_hide.filename)
         image.save(image_path)
@@ -146,7 +143,7 @@ def upload_file():
     
 @app.route('/assets')
 def download_hidden_file():
-      # Generate a random filename using secrets module
+    # Generate a random filename using secrets module
     filename = secrets.token_urlsafe(16)
     
     # Assuming the hidden file is stored in the 'uploads' folder
@@ -159,14 +156,13 @@ def download_hidden_file():
     return send_file(os.path.join(app.config['UPLOAD_FOLDER'], f'{filename}.png'), as_attachment=True)
 
 
-
 @app.route('/extract', methods=['POST'])
 def extract_file():
     try:
         image = request.files.get('image')
         validate_file(image, ['png', 'jpg', 'jpeg', 'bmp'])
 
-        # Save image
+        # Save image to /tmp/uploads
         image_path = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
         image.save(image_path)
 
@@ -189,4 +185,4 @@ def extract_file():
 
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    app.run(debug=True)
