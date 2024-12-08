@@ -124,7 +124,7 @@ def upload_file():
 
         # Validate files
         validate_file(image, ['png', 'jpg', 'jpeg', 'bmp'])
-        validate_file(file_to_hide, ['txt', 'pdf', 'mp4', 'apk', 'zip'])
+        validate_file(file_to_hide, ['txt', 'pdf', 'mp4', 'apk', 'zip','jpg','png'])
 
         # Save files to /tmp/uploads
         image_path = os.path.join(app.config['UPLOAD_FOLDER'], image.filename)
