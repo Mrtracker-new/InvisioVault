@@ -19,7 +19,7 @@
             <form action="/upload" method="post" enctype="multipart/form-data">
                 <label for="image">Select Image:</label>
                 <input type="file" name="image" accept="image/*" required>
-                <label for="file">Select File to Hide:</label>
+                <label for="file"style="color: black">Select File to Hide:</label>
                 <input type="file" name="file" accept=".txt,.pdf,.mp4,.jpg,.png,.apk,.zip" required>
                 <div class="error-message" id="upload-error"></div>
                 <button type="submit">Upload and Hide</button>
@@ -28,7 +28,7 @@
 
         <h2>Extract Hidden File from Image</h2>
         <form action="/extract" method="post" enctype="multipart/form-data">
-            <label for="image">Select Image:</label>
+            <label for="image"style="color: black">Select Image:</label>
             <input type="file" name="image" accept="image/*" required>
             <div class="error-message" id="extract-error"></div>
             <button type="submit">Extract Hidden File</button>
