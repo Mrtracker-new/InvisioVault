@@ -22,10 +22,10 @@ Ensure you have the following installed:
 
 ### 💻 Installation
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/Mrtracker-new/InvisioVault.git
-   cd InvisioVault
+**Clone the Repository**:
+
+    git clone https://github.com/Mrtracker-new/InvisioVault.git
+    cd InvisioVault
 **Install Dependencies**:
 
     pip install -r requirements.txt
