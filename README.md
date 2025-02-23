@@ -17,8 +17,8 @@
 
 ### 📋 Prerequisites
 Ensure you have the following installed:
-- **Python** (v3.8 or higher)
-- **pip** (Python package manager)
+- **Python** (v3.8 or higher),
+- **pip** (Python package manager).
 
 ### 💻 Installation
 
