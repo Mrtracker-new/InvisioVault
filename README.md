@@ -4,6 +4,12 @@
 
 ---
 
+## 🖼️ Visual Preview
+
+![InvisioVault Interface](screenshots/main_page.png)
+
+---
+
 ## 🔥 Features at a Glance
 - 🖼️ **Multi-File Support**: Embed any file type, including `.pdf`, `.mp4`, `.txt`, `.apk`, `.zip`, etc.
 - ⚡ **Smart Compression**: Compress files before embedding for efficient storage.
