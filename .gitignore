@@ -1,0 +1,99 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.vscode/
+
+# Flask
+instance/
+.webassets-cache
+
+# Logs
+*.log
+app.log
+
+# Uploads & Temporary Files
+uploads/
+/tmp/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Distribution / Packaging
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Configuration
+.hintrc
+
+# Project-specific
+*.pptx
+*.webp
+
+# Deployment
+vercel.json
+versel.json
+
+# Frontend build
+frontend/dist/
+frontend/node_modules/
+frontend/.env
+frontend/.env.local
+
+# Backend
+backend/.env
+backend/__pycache__/
+backend/**/__pycache__/
+
+#useless_files
+docs_ignore/
+start.bat 
