@@ -32,9 +32,70 @@
   transition: all 0.3s ease;
 }
 
+.form-group input[type="password"],
+.password-input-wrapper input[type="text"] {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 1rem;
+  transition: all 0.3s ease;
+}
+
+.form-group input[type="password"]:focus,
+.password-input-wrapper input[type="text"]:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+}
+
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input-wrapper input {
+  flex: 1;
+  padding-right: 3rem;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 0.5rem;
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  color: var(--text-dim);
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.password-toggle:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.password-toggle:active {
+  transform: scale(0.95);
+}
+
+.password-toggle:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+}
+
 .form-group input[type="file"]:hover {
   border-color: var(--primary);
-  background: #fafafa;
+  background: #0a0a0a;
 }
 
 .file-name {
@@ -60,7 +121,7 @@
 }
 
 .error-message {
-  background: #f5f5f5;
+  background: #2a1a1a;
   border: 1px solid var(--error);
   color: var(--error);
   padding: 1rem;
@@ -72,20 +133,20 @@
   width: 100%;
   padding: 1rem 2rem;
   background: var(--primary);
-  color: white;
+  color: #000000;
   border: none;
   border-radius: 8px;
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
 }
 
 .submit-button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-  background: #1a1a1a;
+  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.3);
+  background: #e5e5e5;
 }
 
 .submit-button:disabled {
@@ -130,14 +191,14 @@
 
 .download-button {
   background: var(--success);
-  color: white;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  color: #000000;
+  box-shadow: 0 4px 12px rgba(74, 222, 128, 0.3);
 }
 
 .download-button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-  background: #1a1a1a;
+  box-shadow: 0 6px 20px rgba(74, 222, 128, 0.4);
+  background: #22c55e;
 }
 
 .new-button {
@@ -148,6 +209,59 @@
 
 .new-button:hover {
   background: var(--border);
+}
+
+.mode-selector {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  background: var(--bg);
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.mode-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.mode-btn.active {
+  background: var(--primary);
+  color: #000000;
+  box-shadow: 0 2px 8px rgba(255, 255, 255, 0.2);
+}
+
+.form-group textarea {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+  transition: all 0.3s ease;
+}
+
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
 }
 
 @keyframes bounceIn {
