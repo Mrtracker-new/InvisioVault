@@ -218,40 +218,6 @@ Response: Binary file download
 
 ---
 
-## 🌐 Deployment
-
-### Backend Deployment Options
-
-**Heroku**:
-```bash
-# Add Procfile
-echo "web: python backend/app.py" > Procfile
-git push heroku main
-```
-
-**Railway/Render**:
-- Connect your GitHub repository
-- Set build command: `pip install -r backend/requirements.txt`
-- Set start command: `python backend/app.py`
-
-### Frontend Deployment Options
-
-**Vercel**:
-```bash
-cd frontend
-npm run build
-vercel deploy
-```
-
-**Netlify**:
-```bash
-cd frontend
-npm run build
-# Deploy the dist/ folder
-```
-
----
-
 ## 🔒 Security Features
 
 - ✅ File type validation
