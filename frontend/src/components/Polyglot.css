@@ -1,0 +1,306 @@
+/* Import common styles from HideFile.css */
+.polyglot h2 {
+  color: var(--text);
+  margin-bottom: 0.5rem;
+  font-size: 1.8rem;
+}
+
+.polyglot .description {
+  color: var(--text-dim);
+  margin-bottom: 2rem;
+  line-height: 1.6;
+}
+
+.polyglot .form-group {
+  margin-bottom: 1.5rem;
+}
+
+.polyglot .form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.polyglot .form-group input[type="file"] {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.polyglot .form-group input[type="file"]:hover {
+  border-color: var(--primary);
+  background: #0a0a0a;
+}
+
+.polyglot .form-group input[type="password"],
+.polyglot .password-input-wrapper input[type="text"] {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 1rem;
+  transition: all 0.3s ease;
+}
+
+.polyglot .form-group input[type="password"]:focus,
+.polyglot .password-input-wrapper input[type="text"]:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+}
+
+.polyglot .password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.polyglot .password-input-wrapper input {
+  flex: 1;
+  padding-right: 3rem;
+}
+
+.polyglot .password-toggle {
+  position: absolute;
+  right: 0.5rem;
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  color: var(--text-dim);
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.polyglot .password-toggle:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.polyglot .password-toggle:active {
+  transform: scale(0.95);
+}
+
+.polyglot .password-toggle:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+}
+
+.polyglot .file-name {
+  margin-top: 0.5rem;
+  color: var(--success);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.polyglot .file-name::before {
+  content: "✓";
+  background: var(--success);
+  color: #000000;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+}
+
+.polyglot .error-message {
+  background: #2a1a1a;
+  border: 1px solid var(--error);
+  color: var(--error);
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.polyglot .submit-button {
+  width: 100%;
+  padding: 1rem 2rem;
+  background: var(--primary);
+  color: #000000;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+}
+
+.polyglot .submit-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.3);
+  background: #e5e5e5;
+}
+
+.polyglot .submit-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.polyglot .success-card {
+  text-align: center;
+  padding: 2rem;
+  animation: fadeIn 0.5s ease-in;
+}
+
+.polyglot .success-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  animation: bounceIn 0.6s ease-out;
+}
+
+.polyglot .success-card h3 {
+  color: var(--success);
+  margin-bottom: 0.5rem;
+  font-size: 1.5rem;
+}
+
+.polyglot .success-card p {
+  color: var(--text-dim);
+  margin-bottom: 2rem;
+}
+
+.polyglot .download-button,
+.polyglot .new-button {
+  padding: 0.875rem 2rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin: 0.5rem;
+}
+
+.polyglot .download-button {
+  background: var(--success);
+  color: #000000;
+  box-shadow: 0 4px 12px rgba(74, 222, 128, 0.3);
+}
+
+.polyglot .download-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(74, 222, 128, 0.4);
+  background: #22c55e;
+}
+
+.polyglot .new-button {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.polyglot .new-button:hover {
+  background: var(--border);
+}
+
+.polyglot .info-box {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: #0a0a0a;
+  border: 1px solid #333333;
+  border-radius: 8px;
+}
+
+.polyglot .info-box h4 {
+  color: var(--primary);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.polyglot .info-box ul {
+  list-style: none;
+  padding: 0;
+}
+
+.polyglot .info-box li {
+  color: var(--text-dim);
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+
+.polyglot .info-box li::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  color: var(--primary);
+  font-weight: bold;
+}
+
+.polyglot .mode-selector {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  background: var(--bg);
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.polyglot .mode-btn {
+  flex: 1;
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.polyglot .mode-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.polyglot .mode-btn.active {
+  background: var(--primary);
+  color: #000000;
+  box-shadow: 0 2px 8px rgba(255, 255, 255, 0.2);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bounceIn {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
