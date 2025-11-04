@@ -3,9 +3,18 @@ from PIL import Image
 import zlib
 import mimetypes
 import os
+import hashlib
+from cryptography.fernet import Fernet
+import base64
 
 
-def hide_file_in_image(image_path: str, file_path: str, output_path: str) -> str:
+def _derive_key_from_password(password: str) -> bytes:
+    """Derive a Fernet key from a password using SHA256."""
+    key = hashlib.sha256(password.encode()).digest()
+    return base64.urlsafe_b64encode(key)
+
+
+def hide_file_in_image(image_path: str, file_path: str, output_path: str, password: str = None) -> str:
     """
     Hide a file in an image using LSB steganography with compression.
     
@@ -29,6 +38,12 @@ def hide_file_in_image(image_path: str, file_path: str, output_path: str) -> str
     with open(file_path, 'rb') as f:
         file_data = f.read()
     compressed_data = zlib.compress(file_data, level=9)
+    
+    # Encrypt if password is provided
+    if password:
+        key = _derive_key_from_password(password)
+        fernet = Fernet(key)
+        compressed_data = fernet.encrypt(compressed_data)
 
     # Prepare metadata
     original_filename = os.path.basename(file_path)
@@ -52,11 +67,16 @@ def hide_file_in_image(image_path: str, file_path: str, output_path: str) -> str
         }
         mime_type = mime_map.get(ext, 'application/octet-stream')
     
+    # Add password flag to metadata (1 byte: 0x00 for no password, 0x01 for password)
+    password_flag = b'\x01' if password else b'\x00'
     metadata = f"{original_filename}|{mime_type}".encode('utf-8')
     metadata_length = len(metadata).to_bytes(2, 'big')
+    
+    # Store the length of compressed data (4 bytes)
+    data_length = len(compressed_data).to_bytes(4, 'big')
 
-    # Combine metadata and compressed data
-    data_to_hide = metadata_length + metadata + compressed_data
+    # Combine password flag, metadata, data length, and compressed data
+    data_to_hide = password_flag + metadata_length + metadata + data_length + compressed_data
 
     # Check image capacity
     if len(data_to_hide) * 8 > total_pixels * 3:
@@ -84,7 +104,7 @@ def hide_file_in_image(image_path: str, file_path: str, output_path: str) -> str
     return output_path
 
 
-def extract_file_from_image(image_path: str) -> tuple[bytes, str, str]:
+def extract_file_from_image(image_path: str, password: str = None) -> tuple[bytes, str, str]:
     """
     Extract a hidden file from an image.
     
@@ -116,15 +136,41 @@ def extract_file_from_image(image_path: str) -> tuple[bytes, str, str]:
         data_bytes.append(byte)
 
     try:
+        # Check password flag
+        password_flag = data_bytes[0]
+        has_password = password_flag == 0x01
+        
+        if has_password and not password:
+            raise ValueError("This file is password-protected. Please provide the password.")
+        
         # Parse metadata length and metadata
-        metadata_length = int.from_bytes(data_bytes[:2], 'big')
-        metadata = data_bytes[2:2 + metadata_length].decode('utf-8')
+        metadata_length = int.from_bytes(data_bytes[1:3], 'big')
+        metadata = data_bytes[3:3 + metadata_length].decode('utf-8')
         original_filename, mime_type = metadata.split('|')
 
-        # Extract and decompress data
-        compressed_data = bytes(data_bytes[2 + metadata_length:])
+        # Get the data length
+        data_start = 3 + metadata_length
+        data_length = int.from_bytes(data_bytes[data_start:data_start + 4], 'big')
+        
+        # Extract compressed data (only the exact amount we need)
+        compressed_data = bytes(data_bytes[data_start + 4:data_start + 4 + data_length])
+        
+        # Decrypt if password was used
+        if has_password:
+            if not password:
+                raise ValueError("Password is required to extract this file")
+            try:
+                key = _derive_key_from_password(password)
+                fernet = Fernet(key)
+                compressed_data = fernet.decrypt(compressed_data)
+            except Exception:
+                raise ValueError("Incorrect password")
+        
+        # Decompress data
         decompressed_data = zlib.decompress(compressed_data)
 
         return decompressed_data, original_filename, mime_type
+    except ValueError:
+        raise
     except Exception as e:
         raise ValueError(f"Failed to extract file: {str(e)}")
