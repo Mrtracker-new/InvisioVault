@@ -21,7 +21,8 @@ def create_app(config_name='default'):
         r"/api/*": {
             "origins": app.config['CORS_ORIGINS'],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type"]
+            "allow_headers": ["Content-Type"],
+            "expose_headers": ["Content-Disposition"]
         }
     })
     
