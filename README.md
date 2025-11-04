@@ -4,7 +4,7 @@
   <img src="frontend/public/InvisioVault.png" alt="InvisioVault Logo" width="200"/>
 </p>
 
-**InvisioVault** is a modern, full-stack steganography application that allows you to securely hide files within images using LSB (Least Significant Bit) techniques with compression. Built with a separate React frontend and Flask REST API backend for scalability and maintainability.
+**InvisioVault** is your secret-keeping Swiss Army knife! Hide files in images like a digital magician using steganography, OR go full inception mode with polyglot files that work as TWO formats at once. Built with a slick React frontend and Flask backend because we're fancy like that. 🎩✨
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
@@ -12,16 +12,29 @@
 
 ---
 
-## ✨ Features
+## ✨ Features (The Cool Stuff)
 
-- 🎨 **Modern UI**: Beautiful, responsive React interface with dark theme
-- 🔐 **Secure Steganography**: Hide any file type within images using LSB encoding
-- 🗜️ **Smart Compression**: Automatic file compression for efficient storage
-- 📦 **Multiple File Types**: Support for PDFs, videos, documents, archives, and more
-- 🚀 **Separate Architecture**: Independent frontend and backend for easy deployment
-- 🔄 **RESTful API**: Clean API design for easy integration
-- ✅ **File Integrity**: Extract files in their original, unaltered format
-- 📱 **Responsive Design**: Works seamlessly on desktop and mobile devices
+### 🖼️ Steganography Mode
+- 🎨 **Hide Files in Images**: Upload an image, hide your secrets inside using LSB magic
+- 📝 **Text Mode**: Too lazy to create a file? Just type your secrets directly!
+- 🔐 **Password Protection**: Encrypt your hidden files because trust no one
+- 🗜️ **Auto Compression**: We squeeze your files so they fit better (like packing for a trip)
+- 📦 **Any File Type**: PDFs, videos, your crush's photo, memes... we don't judge
+
+### 🔗 Polyglot Mode (The Mind-Bending Stuff)
+- 🤯 **True Polyglot Files**: Create files that work as BOTH formats simultaneously
+  - It's a JPG! No wait, it's a ZIP! Actually... it's BOTH! 🎭
+- 🎪 **Works With Anything**: Images, PDFs, videos, executables - any carrier file you want
+- 🔒 **AES-256 Encryption**: Password-protect the ZIP portion (military-grade, baby!)
+- 🎬 **Carrier Stays Functional**: Your image still opens, your PDF still works, magic!
+
+### 🎯 General Awesomeness
+- 🌙 **Dark Mode by Default**: Because we're not savages
+- 👁️ **Password Toggle**: See what you're typing (or hide it from shoulder surfers)
+- 📱 **Responsive Design**: Works on your phone, tablet, potato... whatever
+- 🚀 **RESTful API**: Integrate it into your own projects if you're feeling adventurous
+- ✅ **File Integrity**: Get your files back EXACTLY as you hid them
+- 🎮 **Easy Mode**: We made it so simple, your grandma could use it (no offense, grandma)
 
 ---
 
@@ -36,6 +49,7 @@ InvisioVault/
 │   │   └── settings.py       # App settings
 │   ├── utils/                # Utilities
 │   │   ├── steganography.py  # Core steganography logic
+│   │   ├── polyglot.py       # Polyglot file magic
 │   │   └── validators.py     # File validation
 │   ├── app.py                # Flask application factory
 │   ├── requirements.txt      # Python dependencies
@@ -47,7 +61,9 @@ InvisioVault/
 │   │   │   ├── HideFile.jsx
 │   │   │   ├── HideFile.css
 │   │   │   ├── ExtractFile.jsx
-│   │   │   └── ExtractFile.css
+│   │   │   ├── ExtractFile.css
+│   │   │   ├── Polyglot.jsx
+│   │   │   └── Polyglot.css
 │   │   ├── App.jsx           # Main application
 │   │   ├── App.css           # Global styles
 │   │   └── main.jsx          # Entry point
@@ -130,6 +146,8 @@ You can run both backend and frontend simultaneously in separate terminals:
 **Terminal 1** (Backend):
 ```bash
 cd backend
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # macOS/Linux
 python app.py
 ```
 
@@ -139,26 +157,50 @@ cd frontend
 npm run dev
 ```
 
-Then open `http://localhost:5173` in your browser.
+Then open `http://localhost:5173` in your browser and start hiding stuff!
 
 ---
 
-## 🎯 How to Use
+## 🎯 How to Use (It's Almost Too Easy)
 
-### Hiding a File
+### 🖼️ Steganography Mode
 
-1. Click on the **"Hide File"** tab
-2. Upload an image (PNG, JPG, JPEG, BMP)
-3. Upload the file you want to hide
-4. Click **"Hide File"**
-5. Download the generated image with the hidden file
+**Hiding Stuff:**
+1. Pick **🖼️ Steganography** mode
+2. Choose **"Hide File"** or **"Hide Text"** (because options are nice)
+3. Upload your cover image (the innocent-looking one)
+4. Upload your file OR type your secret message
+5. (Optional) Add a password because paranoia is healthy
+6. Click **"Hide File"**
+7. Download your now-suspicious-looking-but-totally-innocent image
 
-### Extracting a File
-
-1. Click on the **"Extract File"** tab
-2. Upload an image containing a hidden file
+**Extracting Stuff:**
+1. Upload the image with hidden secrets
+2. Enter password if you used one (or watch it fail dramatically)
 3. Click **"Extract File"**
-4. The hidden file will download automatically with its original name
+4. Your file magically appears! (It's not magic, it's math, but shh...)
+5. If it's text, we'll show it on screen like fancy people
+
+### 🔗 Polyglot Mode (The "Wait, What?" Mode)
+
+**Creating a Polyglot:**
+1. Pick **🔗 Polyglot** mode
+2. Choose **"Create Polyglot"**
+3. Upload your carrier file (image, PDF, whatever floats your boat)
+4. Upload the file you want to hide
+5. (Optional) Add a password for extra security points
+6. Download the polyglot file
+7. **Mind = Blown:** The file works as BOTH formats!
+   - Open it normally → carrier file works fine
+   - Rename to `.zip` → hidden file inside!
+
+**Extracting from Polyglot:**
+1. Choose **"Extract from Polyglot"**
+2. Upload the polyglot file
+3. Enter password if needed
+4. Get your hidden file back
+
+*Pro tip: You can also just rename the polyglot to `.zip` and use WinRAR/7-Zip like a normal person*
 
 ---
 
@@ -206,30 +248,34 @@ Response: Binary file download
 
 ---
 
-## 🛠️ Technology Stack
+## 🛠️ Technology Stack (The Nerdy Bits)
 
-### Backend
-- **Flask** - Web framework
-- **Flask-CORS** - Cross-origin resource sharing
-- **Pillow** - Image processing
-- **Python zlib** - File compression
+### Backend (The Brain)
+- **Flask** - Web framework (lightweight but mighty)
+- **Flask-CORS** - So frontend and backend can be friends
+- **Pillow** - Image wizardry
+- **Cryptography** - For that sweet password encryption
+- **Pyzipper** - AES-256 encrypted ZIPs (because standard ZIP encryption is from the Stone Age)
+- **Python zlib** - Compression that actually works
 
-### Frontend
-- **React** - UI library
-- **Vite** - Build tool and dev server
-- **Axios** - HTTP client
-- **CSS3** - Modern styling with animations
+### Frontend (The Pretty Face)
+- **React** - Because jQuery is so 2010
+- **Vite** - Fast as lightning ⚡
+- **Axios** - HTTP requests made easy
+- **CSS3** - Dark mode, animations, all the eye candy
 
 ---
 
-## 🔒 Security Features
+## 🔒 Security Features (We Take This Seriously... Mostly)
 
-- ✅ File type validation
-- ✅ Size limits (64 MB max)
-- ✅ Path traversal prevention
-- ✅ CORS configuration
-- ✅ Secure file naming with secrets module
-- ✅ Automatic cleanup of temporary files
+- ✅ **File type validation** - No sneaky executables disguised as images
+- ✅ **Size limits** - 64 MB max because we're not made of RAM
+- ✅ **Path traversal prevention** - Nice try, hacker
+- ✅ **Password encryption** - Fernet for stego, AES-256 for polyglots
+- ✅ **CORS configuration** - Only talk to people we trust
+- ✅ **Secure file naming** - Random tokens because predictable names are boring
+- ✅ **Automatic cleanup** - We delete temp files like responsible adults
+- ✅ **Data length tracking** - No buffer overflow shenanigans here
 
 ---
 
@@ -311,7 +357,7 @@ Honestly, I don't even remember HOW I created it. I was just throwing code at th
 
 But hey, it worked! (Sort of. Most of the time. When the stars aligned.)
 
-Now, after actually learning how to code properly, I came back to this project like "Wow... I really made THIS?" So I gave it a complete makeover - separated the frontend and backend, cleaned up the mess, made it actually maintainable, and turned it into something I'm genuinely proud of!
+Now, after actually learning how to code properly, I came back to this project like "Wow... I really made THIS?" So I gave it a complete makeover - separated the frontend and backend, cleaned up the mess, made it actually maintainable, added POLYGLOT FILES (because apparently one way to hide files wasn't enough), threw in some password encryption, made it dark mode because my eyes deserve better, and turned it into something I'm genuinely proud of!
 
 If you're a beginner reading this: **keep going!** Your first project doesn't have to be perfect. Mine certainly wasn't. Just build stuff, break things, and learn along the way. That's how we all started! 💪
 
