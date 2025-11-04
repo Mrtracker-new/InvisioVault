@@ -1,5 +1,9 @@
 # 🔒 InvisioVault
 
+<p align="center">
+  <img src="frontend/public/InvisioVault.png" alt="InvisioVault Logo" width="200"/>
+</p>
+
 **InvisioVault** is a modern, full-stack steganography application that allows you to securely hide files within images using LSB (Least Significant Bit) techniques with compression. Built with a separate React frontend and Flask REST API backend for scalability and maintainability.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
