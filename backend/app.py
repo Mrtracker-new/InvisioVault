@@ -3,9 +3,11 @@ from flask import Flask
 from flask_cors import CORS
 import logging
 import os
+import atexit
 
 from config.settings import config
 from api.routes import api
+from utils.cleanup import init_cleanup_scheduler, stop_cleanup_scheduler
 
 
 def create_app(config_name='default'):
@@ -41,6 +43,15 @@ def create_app(config_name='default'):
     
     # Create upload folder
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    
+    # Initialize file cleanup scheduler
+    # Runs every 10 minutes, deletes files older than 1 hour
+    max_age_hours = int(os.getenv('FILE_MAX_AGE_HOURS', '1'))
+    cleanup_interval = int(os.getenv('CLEANUP_INTERVAL_MINUTES', '10'))
+    init_cleanup_scheduler(app.config['UPLOAD_FOLDER'], max_age_hours, cleanup_interval)
+    
+    # Ensure cleanup stops when app shuts down
+    atexit.register(stop_cleanup_scheduler)
     
     @app.route('/')
     def index():
