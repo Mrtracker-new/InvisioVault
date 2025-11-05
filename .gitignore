@@ -80,8 +80,6 @@ htmlcov/
 *.webp
 
 # Deployment
-vercel.json
-versel.json
 
 # Frontend build
 frontend/dist/
