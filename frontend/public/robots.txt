@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://invisiovault.vercel.app/sitemap.xml
+Sitemap: https://invisio-vault.vercel.app/sitemap.xml
