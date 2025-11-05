@@ -135,6 +135,34 @@ body {
   padding: 1rem 0;
 }
 
+.app-footer a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.app-footer a:hover {
+  color: var(--success);
+  text-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+}
+
+.app-footer a::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--success);
+  transition: width 0.3s ease;
+}
+
+.app-footer a:hover::after {
+  width: 100%;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

@@ -58,7 +58,7 @@ function App() {
       )}
 
       <footer className="app-footer">
-        <p>&copy; 2025 InvisioVault | Built with ❤️ by Rolan</p>
+        <p>&copy; 2025 InvisioVault | Crafted by <a href="https://rolan-rnr.netlify.app/" target="_blank" rel="noopener noreferrer">Rolan</a></p>
       </footer>
     </div>
   )
