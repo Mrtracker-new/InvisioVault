@@ -79,8 +79,11 @@ def create_app(config_name='default'):
     def index():
         return {
             'name': 'InvisioVault API',
-            'version': '2.0.0',
-            'status': 'running'
+            'version': '2.0.1',
+            'status': 'running',
+            'cors_origins': app.config.get('CORS_ORIGINS', []),
+            'flask_env': os.getenv('FLASK_ENV', 'not_set'),
+            'debug': app.config['DEBUG']
         }
     
     return app
