@@ -67,8 +67,8 @@ class Config:
     UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', '/tmp/uploads')
     MAX_CONTENT_LENGTH = 64 * 1024 * 1024  # 64 MB
     
-    # CORS settings - validated on init
-    _cors_origins_raw = os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://localhost:3000')
+    # CORS settings - will be set by subclasses
+    _cors_origins_raw = None
     CORS_ORIGINS = []  # Will be set after validation
     
     # Logging
@@ -82,7 +82,12 @@ class Config:
         Path(Config.UPLOAD_FOLDER).mkdir(parents=True, exist_ok=True)
         
         # Validate and set CORS origins
-        cors_raw = app.config.get('_cors_origins_raw', 'http://localhost:5173,http://localhost:3000')
+        # Read from environment variable OR use class default
+        cors_raw = os.getenv('CORS_ORIGINS') or app.config.get('_cors_origins_raw')
+        
+        if not cors_raw:
+            raise ValueError("CORS_ORIGINS must be set! Either via environment variable or config class.")
+        
         cors_list = cors_raw.split(',')
         app.config['CORS_ORIGINS'] = Config.validate_cors_origins(cors_list)
         
@@ -95,6 +100,9 @@ class DevelopmentConfig(Config):
     """Development configuration."""
     DEBUG = True
     UPLOAD_FOLDER = 'uploads'
+    
+    # Default CORS for local development
+    _cors_origins_raw = 'http://localhost:5173,http://localhost:3000'
     
     # Auto-generate secret key for development if not set
     if not Config.SECRET_KEY:
@@ -111,11 +119,9 @@ class ProductionConfig(Config):
     # Validation happens in init_app()
     
     # Production should use your actual domains
-    # Example: CORS_ORIGINS=https://invisio-vault.vercel.app,https://yourdomain.com
-    _cors_origins_raw = os.getenv(
-        'CORS_ORIGINS',
-        'https://invisio-vault.vercel.app'  # Default to your Vercel deployment
-    )
+    # Example: Set CORS_ORIGINS env var to: https://invisio-vault.vercel.app,https://yourdomain.com
+    # Fallback to Vercel deployment if not set
+    _cors_origins_raw = 'https://invisio-vault.vercel.app'
 
 
 config = {
