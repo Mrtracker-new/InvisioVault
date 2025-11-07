@@ -1,6 +1,8 @@
 """Flask application factory for InvisioVault API."""
 from flask import Flask
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import logging
 import os
 import atexit
@@ -27,6 +29,22 @@ def create_app(config_name='default'):
             "expose_headers": ["Content-Disposition"]
         }
     })
+    
+    # Setup rate limiting to prevent abuse and DOS attacks
+    # Global limits: 200 requests per day, 50 per hour per IP
+    # Heavy operations (hide/create): 10 per hour
+    # Light operations (extract): 20 per hour
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=["200 per day", "50 per hour"],
+        storage_uri=os.getenv('REDIS_URL', 'memory://'),
+        strategy="fixed-window",
+        headers_enabled=True  # Add rate limit headers to responses
+    )
+    
+    # Store limiter in app for use in routes
+    app.limiter = limiter
     
     # Setup logging
     logging.basicConfig(
