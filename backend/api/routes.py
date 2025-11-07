@@ -15,6 +15,11 @@ api = Blueprint('api', __name__, url_prefix='/api')
 logger = logging.getLogger(__name__)
 
 
+def get_limiter():
+    """Get the limiter instance from the current app."""
+    return current_app.limiter
+
+
 @api.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
@@ -24,6 +29,7 @@ def health_check():
 @api.route('/hide', methods=['POST'])
 def hide_file():
     """Hide a file in an image."""
+    # Rate limiting handled at app level
     try:
         # Validate request
         image = request.files.get('image')
