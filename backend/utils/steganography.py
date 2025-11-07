@@ -3,14 +3,32 @@ from PIL import Image
 import zlib
 import mimetypes
 import os
-import hashlib
+import secrets
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 import base64
 
 
-def _derive_key_from_password(password: str) -> bytes:
-    """Derive a Fernet key from a password using SHA256."""
-    key = hashlib.sha256(password.encode()).digest()
+def _derive_key_from_password(password: str, salt: bytes) -> bytes:
+    """Derive a Fernet key from a password using PBKDF2 with salt.
+    
+    Args:
+        password: User password
+        salt: 16-byte salt for key derivation
+        
+    Returns:
+        32-byte Fernet key
+    """
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=480000,  # OWASP recommended minimum for 2023+
+        backend=default_backend()
+    )
+    key = kdf.derive(password.encode())
     return base64.urlsafe_b64encode(key)
 
 
@@ -39,9 +57,11 @@ def hide_file_in_image(image_path: str, file_path: str, output_path: str, passwo
         file_data = f.read()
     compressed_data = zlib.compress(file_data, level=9)
     
-    # Encrypt if password is provided
+    # Generate salt and encrypt if password is provided
+    salt = b''
     if password:
-        key = _derive_key_from_password(password)
+        salt = secrets.token_bytes(16)  # 16-byte random salt
+        key = _derive_key_from_password(password, salt)
         fernet = Fernet(key)
         compressed_data = fernet.encrypt(compressed_data)
 
@@ -75,8 +95,9 @@ def hide_file_in_image(image_path: str, file_path: str, output_path: str, passwo
     # Store the length of compressed data (4 bytes)
     data_length = len(compressed_data).to_bytes(4, 'big')
 
-    # Combine password flag, metadata, data length, and compressed data
-    data_to_hide = password_flag + metadata_length + metadata + data_length + compressed_data
+    # Combine password flag, salt (if encrypted), metadata, data length, and compressed data
+    # Structure: [password_flag(1)] [salt(16 if encrypted)] [metadata_length(2)] [metadata] [data_length(4)] [compressed_data]
+    data_to_hide = password_flag + salt + metadata_length + metadata + data_length + compressed_data
 
     # Check image capacity
     if len(data_to_hide) * 8 > total_pixels * 3:
@@ -143,24 +164,33 @@ def extract_file_from_image(image_path: str, password: str = None) -> tuple[byte
         if has_password and not password:
             raise ValueError("This file is password-protected. Please provide the password.")
         
+        # Extract salt if encrypted (16 bytes after password flag)
+        offset = 1
+        salt = b''
+        if has_password:
+            salt = bytes(data_bytes[offset:offset + 16])
+            offset += 16
+        
         # Parse metadata length and metadata
-        metadata_length = int.from_bytes(data_bytes[1:3], 'big')
-        metadata = data_bytes[3:3 + metadata_length].decode('utf-8')
+        metadata_length = int.from_bytes(data_bytes[offset:offset + 2], 'big')
+        offset += 2
+        metadata = data_bytes[offset:offset + metadata_length].decode('utf-8')
         original_filename, mime_type = metadata.split('|')
+        offset += metadata_length
 
         # Get the data length
-        data_start = 3 + metadata_length
-        data_length = int.from_bytes(data_bytes[data_start:data_start + 4], 'big')
+        data_length = int.from_bytes(data_bytes[offset:offset + 4], 'big')
+        offset += 4
         
         # Extract compressed data (only the exact amount we need)
-        compressed_data = bytes(data_bytes[data_start + 4:data_start + 4 + data_length])
+        compressed_data = bytes(data_bytes[offset:offset + data_length])
         
         # Decrypt if password was used
         if has_password:
             if not password:
                 raise ValueError("Password is required to extract this file")
             try:
-                key = _derive_key_from_password(password)
+                key = _derive_key_from_password(password, salt)
                 fernet = Fernet(key)
                 compressed_data = fernet.decrypt(compressed_data)
             except Exception:
