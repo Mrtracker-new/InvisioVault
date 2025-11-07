@@ -1,5 +1,5 @@
 """Flask application factory for InvisioVault API."""
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -59,6 +59,48 @@ def create_app(config_name='default'):
             logging.StreamHandler()
         ]
     )
+    
+    # Add security headers to all responses
+    @app.after_request
+    def add_security_headers(response):
+        """Add security headers to prevent common attacks."""
+        # Prevent MIME type sniffing
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        
+        # Prevent clickjacking attacks
+        response.headers['X-Frame-Options'] = 'DENY'
+        
+        # Enable XSS protection (legacy browsers)
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        
+        # Referrer policy - don't leak URLs to third parties
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        
+        # Content Security Policy - prevent XSS and data injection
+        csp = (
+            "default-src 'none'; "
+            "script-src 'none'; "
+            "style-src 'none'; "
+            "img-src 'none'; "
+            "font-src 'none'; "
+            "connect-src 'none'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'none'; "
+            "form-action 'none'"
+        )
+        response.headers['Content-Security-Policy'] = csp
+        
+        # Permissions Policy - restrict browser features
+        response.headers['Permissions-Policy'] = (
+            'geolocation=(), microphone=(), camera=(), '
+            'payment=(), usb=(), magnetometer=(), gyroscope=()'
+        )
+        
+        # HSTS - Force HTTPS (only in production with HTTPS)
+        if not app.config['DEBUG'] and request.is_secure:
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        
+        return response
     
     # Register blueprints
     app.register_blueprint(api)
