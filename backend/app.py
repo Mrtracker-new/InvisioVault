@@ -18,17 +18,21 @@ def create_app(config_name='default'):
     
     # Load configuration
     app.config.from_object(config[config_name])
-    config[config_name].init_app(app)
+    config[config_name].init_app(app)  # This validates and sets CORS_ORIGINS
     
-    # Setup CORS
+    # Setup CORS (AFTER config initialization so CORS_ORIGINS is validated)
     CORS(app, resources={
         r"/api/*": {
             "origins": app.config['CORS_ORIGINS'],
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type"],
-            "expose_headers": ["Content-Disposition"]
+            "expose_headers": ["Content-Disposition"],
+            "supports_credentials": False
         }
     })
+    
+    # Log CORS origins for debugging
+    app.logger.info(f"CORS enabled for origins: {app.config['CORS_ORIGINS']}")
     
     # Setup rate limiting to prevent abuse and DOS attacks
     # Global limits: 200 requests per day, 50 per hour per IP
