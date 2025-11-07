@@ -15,6 +15,44 @@ api = Blueprint('api', __name__, url_prefix='/api')
 logger = logging.getLogger(__name__)
 
 
+# Security: Sanitize error messages for production
+SAFE_ERROR_MESSAGES = {
+    'password': 'Authentication failed. Please check your password.',
+    'capacity': 'The selected image is too small to hide this file.',
+    'validation': 'Invalid file format or corrupted data.',
+    'not_found': 'The requested file could not be found.',
+    'generic': 'An error occurred while processing your request. Please try again.'
+}
+
+
+def sanitize_error(error_message: str, is_debug: bool = False) -> str:
+    """Sanitize error messages to avoid leaking internal details in production.
+    
+    Args:
+        error_message: The original error message
+        is_debug: Whether app is in debug mode
+        
+    Returns:
+        Safe error message for production, or original for debug
+    """
+    if is_debug:
+        return error_message
+    
+    # Map specific errors to safe messages
+    error_lower = error_message.lower()
+    
+    if 'password' in error_lower or 'incorrect password' in error_lower:
+        return SAFE_ERROR_MESSAGES['password']
+    elif 'capacity' in error_lower or 'not enough' in error_lower:
+        return SAFE_ERROR_MESSAGES['capacity']
+    elif 'invalid' in error_lower or 'corrupt' in error_lower or 'failed to extract' in error_lower:
+        return SAFE_ERROR_MESSAGES['validation']
+    elif 'not found' in error_lower:
+        return SAFE_ERROR_MESSAGES['not_found']
+    else:
+        return SAFE_ERROR_MESSAGES['generic']
+
+
 def get_limiter():
     """Get the limiter instance from the current app."""
     return current_app.limiter
@@ -85,10 +123,12 @@ def hide_file():
 
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
-        return jsonify({'error': str(e)}), 400
+        safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 400
     except Exception as e:
         logger.error(f"Error hiding file: {str(e)}")
-        return jsonify({'error': 'An error occurred while hiding the file'}), 500
+        safe_error = sanitize_error('An error occurred while hiding the file', current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 500
 
 
 @api.route('/download/<download_id>', methods=['GET'])
@@ -113,7 +153,8 @@ def download_image(download_id):
 
     except Exception as e:
         logger.error(f"Error downloading file: {str(e)}")
-        return jsonify({'error': 'An error occurred while downloading the file'}), 500
+        safe_error = sanitize_error('An error occurred while downloading the file', current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 500
 
 
 @api.route('/extract', methods=['POST'])
@@ -157,10 +198,12 @@ def extract_file():
 
     except ValueError as e:
         logger.error(f"Extraction error: {str(e)}")
-        return jsonify({'error': str(e)}), 400
+        safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 400
     except Exception as e:
         logger.error(f"Error extracting file: {str(e)}")
-        return jsonify({'error': 'An error occurred while extracting the file'}), 500
+        safe_error = sanitize_error('An error occurred while extracting the file', current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 500
 
 
 @api.route('/polyglot/create', methods=['POST'])
@@ -208,10 +251,12 @@ def create_polyglot_file():
 
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
-        return jsonify({'error': str(e)}), 400
+        safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 400
     except Exception as e:
         logger.error(f"Error creating polyglot: {str(e)}")
-        return jsonify({'error': 'An error occurred while creating the polyglot file'}), 500
+        safe_error = sanitize_error('An error occurred while creating the polyglot file', current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 500
 
 
 @api.route('/polyglot/download/<download_id>', methods=['GET'])
@@ -235,7 +280,8 @@ def download_polyglot(download_id):
 
     except Exception as e:
         logger.error(f"Error downloading polyglot: {str(e)}")
-        return jsonify({'error': 'An error occurred while downloading the file'}), 500
+        safe_error = sanitize_error('An error occurred while downloading the file', current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 500
 
 
 @api.route('/polyglot/extract', methods=['POST'])
@@ -276,10 +322,12 @@ def extract_from_polyglot_file():
 
     except ValueError as e:
         logger.error(f"Polyglot extraction error: {str(e)}")
-        return jsonify({'error': str(e)}), 400
+        safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 400
     except Exception as e:
         logger.error(f"Error extracting from polyglot: {str(e)}")
-        return jsonify({'error': 'An error occurred while extracting the file'}), 500
+        safe_error = sanitize_error('An error occurred while extracting the file', current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 500
 
 
 @api.errorhandler(413)
