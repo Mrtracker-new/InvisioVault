@@ -22,11 +22,15 @@
 - 📦 **Any File Type**: PDFs, videos, your crush's photo, memes... we don't judge
 
 ### 🔗 Polyglot Mode (The Mind-Bending Stuff)
-- 🤯 **True Polyglot Files**: Create files that work as BOTH formats simultaneously
-  - It's a JPG! No wait, it's a ZIP! Actually... it's BOTH! 🎭
-- 🎪 **Works With Anything**: Images, PDFs, videos, executables - any carrier file you want
-- 🔒 **AES-256 Encryption**: Password-protect the ZIP portion (military-grade, baby!)
-- 🎬 **Carrier Stays Functional**: Your image still opens, your PDF still works, magic!
+- 🤯 **Universal True Polyglot**: ANY format as carrier + ANY format hidden inside!
+  - Upload a JPG and hide a PDF? ✅ PNG and hide a video? ✅ MP4 and hide documents? ✅
+  - No manual zipping required - we handle EVERYTHING automatically!
+- 🎪 **Any Format Combination**: Images, PDFs, videos, executables, audio - mix and match freely
+  - Carrier file: JPG, PNG, GIF, PDF, MP4, AVI, MP3... you name it!
+  - Hidden file: Literally ANY file type - documents, code, media, archives, whatever!
+- 🔒 **AES-256 Encryption**: Password-protect your hidden files (military-grade security!)
+- 🎬 **Carrier Stays Functional**: Your image still opens, your PDF still works, pure magic!
+- 🚀 **Zero Manual Work**: Upload both files, we handle compression and polyglot creation
 
 ### 🎯 General Awesomeness
 - 🌙 **Dark Mode by Default**: Because we're not savages
@@ -186,21 +190,24 @@ Then open `http://localhost:5173` in your browser and start hiding stuff!
 **Creating a Polyglot:**
 1. Pick **🔗 Polyglot** mode
 2. Choose **"Create Polyglot"**
-3. Upload your carrier file (image, PDF, whatever floats your boat)
-4. Upload the file you want to hide
+3. Upload your carrier file - **ANY format works!** (JPG, PNG, PDF, MP4, GIF, MP3, you name it)
+4. Upload the file you want to hide - **ANY format!** (PDF, video, documents, code, archives, whatever)
 5. (Optional) Add a password for extra security points
-6. Download the polyglot file
-7. **Mind = Blown:** The file works as BOTH formats!
-   - Open it normally → carrier file works fine
-   - Rename to `.zip` → hidden file inside!
+6. Click create - **we automatically compress and create the polyglot for you!**
+7. Download the polyglot file
+8. **Mind = Blown:** The file works as BOTH formats!
+   - Open it normally → carrier file works perfectly
+   - Rename to `.zip` and open → hidden file inside!
 
 **Extracting from Polyglot:**
 1. Choose **"Extract from Polyglot"**
-2. Upload the polyglot file
+2. Upload the polyglot file (any carrier format)
 3. Enter password if needed
-4. Get your hidden file back
+4. Get your hidden file back in its original format
 
 *Pro tip: You can also just rename the polyglot to `.zip` and use WinRAR/7-Zip like a normal person*
+
+**🎯 The Magic:** No manual zipping, no format restrictions - just upload ANY two files and we create a working polyglot that functions as both! That's true universal polyglot capability.
 
 ---
 
