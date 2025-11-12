@@ -6,6 +6,10 @@ from flask_limiter.util import get_remote_address
 import logging
 import os
 import atexit
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from config.settings import config
 from api.routes import api
