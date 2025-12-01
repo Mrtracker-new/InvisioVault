@@ -1,0 +1,26 @@
+services:
+  # Backend Web Service
+  - type: web
+    name: invisiovault-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 2 --timeout 120 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DEBUG
+        value: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: UPLOAD_FOLDER
+        value: uploads
+      - key: PORT
+        value: 10000
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FILE
+        value: app.log
+      - key: CORS_ORIGINS
+        sync: false
+    healthCheckPath: /api/health
+    autoDeploy: true
