@@ -6,10 +6,10 @@ function TutorialModal({ isOpen, onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>×</button>
-        
+        <button className="modal-close" onClick={onClose} aria-label="Close tutorial">✕</button>
+
         <h2>📖 How to Use InvisioVault</h2>
-        
+
         <div className="tutorial-section">
           <h3>🖼️ Steganography Mode</h3>
           <div className="tutorial-step">
@@ -22,7 +22,7 @@ function TutorialModal({ isOpen, onClose }) {
               <li>Download your image - it looks normal but contains your hidden file!</li>
             </ol>
           </div>
-          
+
           <div className="tutorial-step">
             <h4>Extract File</h4>
             <ol>
