@@ -3,7 +3,9 @@ import HideFile from './components/HideFile'
 import ExtractFile from './components/ExtractFile'
 import Polyglot from './components/Polyglot'
 import TutorialModal from './components/TutorialModal'
+import WakeServerButton from './components/WakeServerButton'
 import './App.css'
+
 
 function App() {
   const [mode, setMode] = useState('stego') // 'stego' or 'polyglot'
@@ -13,13 +15,16 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <button 
-          className="info-button" 
-          onClick={() => setShowTutorial(true)}
-          title="How to use InvisioVault"
-        >
-          ℹ️
-        </button>
+        <div className="header-top">
+          <WakeServerButton />
+          <button
+            className="info-button"
+            onClick={() => setShowTutorial(true)}
+            title="How to use InvisioVault"
+          >
+            ℹ️
+          </button>
+        </div>
         <h1>🔒 InvisioVault</h1>
         <p>Secure file hiding using steganography and polyglot techniques</p>
       </header>
@@ -70,9 +75,9 @@ function App() {
         <p>&copy; 2025 InvisioVault | Crafted by <a href="https://rolan-rnr.netlify.app/" target="_blank" rel="noopener noreferrer">Rolan</a></p>
       </footer>
 
-      <TutorialModal 
-        isOpen={showTutorial} 
-        onClose={() => setShowTutorial(false)} 
+      <TutorialModal
+        isOpen={showTutorial}
+        onClose={() => setShowTutorial(false)}
       />
     </div>
   )

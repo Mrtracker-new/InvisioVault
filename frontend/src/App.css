@@ -1,236 +1,222 @@
-:root {
-  --primary: #ffffff;
-  --primary-dark: #e5e5e5;
-  --secondary: #cccccc;
-  --success: #4ade80;
-  --error: #ef4444;
-  --bg: #000000;
-  --bg-card: #1a1a1a;
-  --text: #ffffff;
-  --text-dim: #a1a1a1;
-  --border: #333333;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-  background: #000000;
-  color: var(--text);
-  min-height: 100vh;
-}
+/* -------------------------------------------------------------------------- */
+/*                               App Layout                                   */
+/* -------------------------------------------------------------------------- */
 
 .app {
+  width: 100%;
   max-width: 900px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: var(--space-8) var(--space-4);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
+/* -------------------------------------------------------------------------- */
+/*                               Header                                       */
+/* -------------------------------------------------------------------------- */
+
 .app-header {
-  text-align: center;
-  margin-bottom: 3rem;
-  animation: fadeIn 0.6s ease-in;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: var(--space-12);
   position: relative;
+  text-align: center;
+}
+
+.header-top {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .app-header h1 {
-  font-size: 3rem;
-  color: var(--primary);
-  margin-bottom: 0.5rem;
+  font-size: var(--text-3xl);
+  font-weight: var(--font-semibold);
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
 }
 
 .app-header p {
-  color: var(--text-dim);
-  font-size: 1.1rem;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  max-width: 480px;
+  line-height: 1.5;
+  margin: 0 auto;
 }
 
+/* -------------------------------------------------------------------------- */
+/*                               Controls                                     */
+/* -------------------------------------------------------------------------- */
+
 .info-button {
-  position: absolute;
-  top: 0;
-  right: 0;
-  background: transparent;
-  border: 2px solid var(--border);
-  border-radius: 50%;
-  width: 48px;
-  height: 48px;
-  font-size: 1.5rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.03);
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-dim);
+  font-size: var(--text-lg);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .info-button:hover {
-  background: var(--primary);
-  border-color: var(--primary);
-  transform: scale(1.1) rotate(15deg);
-  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
 }
+
+/* -------------------------------------------------------------------------- */
+/*                               Mode Switching                               */
+/* -------------------------------------------------------------------------- */
 
 .mode-container {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 2rem;
-  justify-content: center;
+  /* background: var(--bg-surface); */
+  padding: 4px;
+  /* var(--space-1) */
+  border-radius: var(--radius-lg);
+  /* border: 1px solid var(--border-subtle); */
+  margin: 0 auto var(--space-8);
+  width: fit-content;
 }
 
 .mode-tab {
-  padding: 1rem 2rem;
-  background: var(--bg-card);
-  border: 2px solid var(--border);
-  border-radius: 12px;
-  color: var(--text-dim);
-  font-size: 1.1rem;
-  font-weight: 600;
+  padding: var(--space-3) var(--space-6);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.3s ease;
-  min-width: 180px;
+  transition: all var(--duration-fast) var(--ease-out);
 }
 
 .mode-tab:hover {
-  border-color: var(--primary);
-  color: var(--text);
-  transform: translateY(-2px);
+  color: var(--text-primary);
 }
 
 .mode-tab.active {
-  background: var(--primary);
-  color: #000000;
-  border-color: var(--primary);
-  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-sm);
 }
+
+/* -------------------------------------------------------------------------- */
+/*                               Content Area                                 */
+/* -------------------------------------------------------------------------- */
 
 .tab-container {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 2rem;
-  background: var(--bg-card);
-  padding: 0.5rem;
-  border-radius: 12px;
-  border: 1px solid var(--border);
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--space-2);
 }
 
 .tab {
-  flex: 1;
-  padding: 1rem 2rem;
+  padding: var(--space-2) var(--space-4);
   background: transparent;
   border: none;
-  border-radius: 8px;
-  color: var(--text-dim);
-  font-size: 1rem;
-  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: color var(--duration-fast) ease;
 }
 
 .tab:hover {
-  background: #2a2a2a;
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 .tab.active {
-  background: var(--primary);
-  color: #000000;
-  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
+  color: var(--text-primary);
+  border-bottom-color: var(--text-primary);
 }
 
 .content {
-  flex: 1;
-  background: var(--bg-card);
-  border-radius: 16px;
-  padding: 2.5rem;
-  border: 1px solid var(--border);
-  box-shadow: 0 20px 25px -5px rgba(255, 255, 255, 0.1);
-  animation: slideUp 0.5s ease-out;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  box-shadow: var(--shadow-sm);
+  animation: fadeIn var(--duration-normal) var(--ease-out);
 }
 
+/* -------------------------------------------------------------------------- */
+/*                               Footer                                       */
+/* -------------------------------------------------------------------------- */
+
 .app-footer {
-  margin-top: 3rem;
+  margin-top: auto;
+  padding-top: var(--space-12);
   text-align: center;
-  color: var(--text-dim);
-  font-size: 0.9rem;
-  padding: 1rem 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
 }
 
 .app-footer a {
-  color: var(--primary);
+  color: var(--text-secondary);
   text-decoration: none;
-  font-weight: 600;
-  transition: all 0.3s ease;
-  position: relative;
+  /* font-weight: var(--font-medium); */
+  transition: color var(--duration-fast);
 }
 
 .app-footer a:hover {
-  color: var(--success);
-  text-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+  color: var(--text-primary);
 }
 
-.app-footer a::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  width: 0;
-  height: 2px;
-  background: var(--success);
-  transition: width 0.3s ease;
-}
-
-.app-footer a:hover::after {
-  width: 100%;
-}
+/* -------------------------------------------------------------------------- */
+/*                               Animations                                   */
+/* -------------------------------------------------------------------------- */
 
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(-20px);
+    transform: translateY(4px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
 
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* -------------------------------------------------------------------------- */
+/*                               Responsiveness                               */
+/* -------------------------------------------------------------------------- */
 
-@media (max-width: 768px) {
+@media (max-width: 640px) {
   .app {
-    padding: 1rem;
-  }
-
-  .app-header h1 {
-    font-size: 2rem;
+    padding: var(--space-4);
   }
 
   .content {
-    padding: 1.5rem;
+    padding: var(--space-4);
   }
 
-  .tab-container {
-    flex-direction: column;
+  .app-header h1 {
+    font-size: var(--text-2xl);
   }
 
-  .info-button {
-    width: 40px;
-    height: 40px;
-    font-size: 1.3rem;
+  .mode-tab {
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
   }
 }
