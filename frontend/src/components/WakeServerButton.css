@@ -1,0 +1,564 @@
+/* ============================================================================ */
+/*                         POWER-ON BUTTON STYLES                             */
+/* ============================================================================ */
+
+/* --- Container --- */
+.wake-server-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+/* --- CSS Custom Properties --- */
+:root {
+  --power-btn-size-mobile: 48px;
+  --power-btn-size-desktop: 52px;
+
+  /* Glow colors for each state */
+  --glow-idle: rgba(59, 130, 246, 0.4);
+  --glow-loading: rgba(251, 191, 36, 0.5);
+  --glow-success: rgba(74, 222, 128, 0.6);
+  --glow-error: rgba(239, 68, 68, 0.5);
+
+  /* Animation durations */
+  --power-transition: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --power-bounce: 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ============================================================================ */
+/*                            BASE BUTTON DESIGN                              */
+/* ============================================================================ */
+
+.power-button {
+  /* Layout */
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  /* Size - Mobile First (Icon Only) */
+  width: var(--power-btn-size-mobile);
+  height: var(--power-btn-size-mobile);
+  min-width: var(--power-btn-size-mobile);
+  padding: 0;
+
+  /* Visual Design */
+  background: rgba(15, 23, 42, 0.6);
+  border: 2px solid rgba(148, 163, 184, 0.2);
+  border-radius: 50%;
+
+  /* Typography */
+  color: rgba(148, 163, 184, 0.9);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+
+  /* Effects */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  /* Interaction */
+  cursor: pointer;
+  overflow: visible;
+  transition: all var(--power-transition);
+
+  /* Ensure proper stacking */
+  isolation: isolate;
+}
+
+/* ============================================================================ */
+/*                         INTERACTIVE STATES                                 */
+/* ============================================================================ */
+
+/* --- Hover (Desktop Only) --- */
+@media (hover: hover) and (pointer: fine) {
+  .power-button:hover:not(:disabled) {
+    background: rgba(15, 23, 42, 0.8);
+    border-color: rgba(148, 163, 184, 0.4);
+    color: rgba(226, 232, 240, 1);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow:
+      0 8px 24px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* --- Active/Click --- */
+.power-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.95);
+  transition: all 100ms ease-out;
+}
+
+/* --- Focus (Keyboard Navigation) --- */
+.power-button:focus-visible {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.8);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+/* --- Disabled State --- */
+.power-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ============================================================================ */
+/*                          STATE-SPECIFIC STYLES                             */
+/* ============================================================================ */
+
+/* --- IDLE: Subtle Breathing Pulse --- */
+.power-button.idle .glow-layer {
+  /* Breathing pulse disabled - no blue glow in idle state */
+  opacity: 0;
+}
+
+@keyframes breathing-pulse {
+
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+/* --- WAKING: Loading State --- */
+.power-button.waking {
+  border-color: rgba(251, 191, 36, 0.5);
+  color: rgb(251, 191, 36);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.power-button.waking .glow-layer {
+  opacity: 0;
+}
+
+@keyframes pulse-glow {
+
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* --- ONLINE: Success State --- */
+.power-button.online {
+  border-color: rgba(74, 222, 128, 0.6);
+  background: rgba(74, 222, 128, 0.1);
+  color: rgb(74, 222, 128);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: success-bloom 600ms var(--power-bounce);
+}
+
+@keyframes success-bloom {
+  0% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.15);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.power-button.online .glow-layer {
+  opacity: 0;
+}
+
+@keyframes bloom-pulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+
+  100% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+}
+
+/* --- ERROR: Shake Animation --- */
+.power-button.error {
+  border-color: rgba(239, 68, 68, 0.6);
+  color: rgb(239, 68, 68);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: shake 600ms ease-in-out;
+}
+
+@keyframes shake {
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-6px);
+  }
+
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+.power-button.error .glow-layer {
+  opacity: 0;
+}
+
+/* --- COOLDOWN: Muted State --- */
+.power-button.cooldown {
+  border-color: rgba(148, 163, 184, 0.2);
+  color: rgba(148, 163, 184, 0.5);
+  background: rgba(15, 23, 42, 0.4);
+}
+
+/* ============================================================================ */
+/*                           INTERNAL ELEMENTS                                */
+/* ============================================================================ */
+
+/* --- Glow Background Layer --- */
+.glow-layer {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow-idle) 0%, transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+  transition: all var(--power-transition);
+}
+
+/* --- Power Icon --- */
+.power-icon {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  transition: all var(--power-transition);
+  z-index: 2;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+/* Icon animation on state change */
+.power-button.waking .power-icon {
+  animation: icon-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes icon-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* --- Loading Spinner --- */
+.spinner-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.spinner-track {
+  stroke: rgba(251, 191, 36, 0.2);
+  stroke-width: 3;
+}
+
+.spinner-arc {
+  stroke: rgb(251, 191, 36);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 80;
+  stroke-dashoffset: 60;
+  transform-origin: center;
+  animation: spinner-rotate 1.2s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
+}
+
+@keyframes spinner-rotate {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Success Checkmark --- */
+.success-checkmark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  stroke: rgb(74, 222, 128);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  z-index: 3;
+  filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.8));
+  animation: checkmark-appear 600ms var(--power-bounce);
+}
+
+@keyframes checkmark-appear {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* Draw animation for checkmark path */
+.success-checkmark polyline {
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
+  animation: checkmark-draw 400ms ease-out 200ms forwards;
+}
+
+@keyframes checkmark-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* --- Status Label (Hidden on Mobile) --- */
+.status-label {
+  display: none;
+  white-space: nowrap;
+  font-weight: 600;
+  z-index: 2;
+}
+
+/* ============================================================================ */
+/*                           TOAST NOTIFICATION                               */
+/* ============================================================================ */
+
+.status-toast {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  min-width: 200px;
+  max-width: 280px;
+
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(226, 232, 240, 0.9);
+  line-height: 1.4;
+
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 100;
+}
+
+.status-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.status-toast .toast-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.6);
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* Toast Variants */
+.status-toast.loading .toast-dot {
+  background: rgb(251, 191, 36);
+  animation: dot-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.status-toast.success .toast-dot {
+  background: rgb(74, 222, 128);
+}
+
+.status-toast.error .toast-dot {
+  background: rgb(239, 68, 68);
+}
+
+/* ============================================================================ */
+/*                          RESPONSIVE DESIGN                                 */
+/* ============================================================================ */
+
+/* Tablet & Desktop: Show Text Label */
+@media (min-width: 768px) {
+  .power-button {
+    width: auto;
+    min-width: var(--power-btn-size-desktop);
+    height: var(--power-btn-size-desktop);
+    padding: 0 20px;
+    border-radius: 26px;
+  }
+
+  .power-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .status-label {
+    display: block;
+    animation: label-fade-in 300ms ease-out;
+  }
+
+  @keyframes label-fade-in {
+    from {
+      opacity: 0;
+      transform: translateX(-4px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}
+
+/* Large Desktop: Slightly larger design */
+@media (min-width: 1440px) {
+  .power-button {
+    min-width: 56px;
+    height: 56px;
+    padding: 0 24px;
+    font-size: 14px;
+  }
+
+  .power-icon {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* ============================================================================ */
+/*                          ACCESSIBILITY                                     */
+/* ============================================================================ */
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+
+  .power-button,
+  .power-button *,
+  .glow-layer,
+  .status-toast {
+    animation: none !important;
+    transition: opacity 200ms ease, color 200ms ease !important;
+  }
+
+  .power-button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  .power-button {
+    border-width: 3px;
+    border-color: currentColor;
+  }
+
+  .power-button:focus-visible {
+    outline: 3px solid currentColor;
+    outline-offset: 2px;
+  }
+}
+
+/* Touch Device Optimization */
+@media (hover: none) and (pointer: coarse) {
+  .power-button {
+    /* Ensure minimum touch target size */
+    min-width: 48px;
+    min-height: 48px;
+  }
+
+  /* Provide visual feedback for touch */
+  .power-button:active:not(:disabled) {
+    background: rgba(15, 23, 42, 0.9);
+    transform: scale(0.95);
+  }
+}
