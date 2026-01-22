@@ -65,7 +65,11 @@ class Config:
     
     # Upload settings
     UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', '/tmp/uploads')
-    MAX_CONTENT_LENGTH = 64 * 1024 * 1024  # 64 MB
+    
+    # File size limits (in bytes)
+    MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB - for carrier images
+    MAX_HIDEABLE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB - for files to hide
+    MAX_CONTENT_LENGTH = 64 * 1024 * 1024  # 64 MB - total request limit
     
     # CORS settings - will be set by subclasses
     _cors_origins_raw = None
