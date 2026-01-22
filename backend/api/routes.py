@@ -333,4 +333,9 @@ def extract_from_polyglot_file():
 @api.errorhandler(413)
 def request_entity_too_large(error):
     """Handle file too large error."""
-    return jsonify({'error': 'File too large. Maximum size is 64 MB'}), 413
+    max_size = current_app.config.get('MAX_CONTENT_LENGTH', 64 * 1024 * 1024)
+    max_size_mb = max_size // (1024 * 1024)
+    return jsonify({
+        'error': f'Request too large. Maximum total size is {max_size_mb} MB. '
+                 f'Individual limits: Images (10 MB), Files (50 MB)'
+    }), 413
