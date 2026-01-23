@@ -2,6 +2,7 @@ import { useState } from 'react'
 import axios from 'axios'
 import './Polyglot.css'
 import API_URL from '../config/api'
+import CapacityIndicator from './CapacityIndicator'
 
 function Polyglot() {
   const [mode, setMode] = useState('create') // 'create' or 'extract'
@@ -83,7 +84,7 @@ function Polyglot() {
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      
+
       const contentDisposition = response.headers['content-disposition']
       let filename = 'extracted_file'
       if (contentDisposition) {
@@ -93,7 +94,7 @@ function Polyglot() {
           filename = decodeURIComponent(filenameMatch[1].trim())
         }
       }
-      
+
       link.setAttribute('download', filename)
       document.body.appendChild(link)
       link.click()
@@ -197,6 +198,22 @@ function Polyglot() {
               </div>
               {password && <p className="file-name">🔐 ZIP will be password-protected</p>}
             </div>
+
+            {/* Capacity Indicator - Informational for Polyglot */}
+            {carrierFile && fileToHide && (
+              <div className="info-box" style={{ marginBottom: '1rem' }}>
+                <h4>📊 File Size Information</h4>
+                <p style={{ margin: '0.5rem 0' }}>
+                  <strong>Carrier:</strong> {(carrierFile.size / 1024).toFixed(2)} KB
+                </p>
+                <p style={{ margin: '0.5rem 0' }}>
+                  <strong>File to Hide:</strong> {(fileToHide.size / 1024).toFixed(2)} KB
+                </p>
+                <p style={{ margin: '0.5rem 0', fontSize: '0.85rem', opacity: '0.8' }}>
+                  ℹ️ Final polyglot size will be approximately {((carrierFile.size + fileToHide.size) / 1024).toFixed(2)} KB
+                </p>
+              </div>
+            )}
 
             {error && <div className="error-message">{error}</div>}
 
