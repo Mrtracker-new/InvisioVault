@@ -4,7 +4,7 @@
   <img src="frontend/public/InvisioVault.png" alt="InvisioVault Logo" width="200"/>
 </p>
 
-**InvisioVault** is your secret-keeping Swiss Army knife! Hide files in images like a digital magician using steganography, OR go full inception mode with polyglot files that work as TWO formats at once. Built with a slick React frontend and Flask backend because we're fancy like that. 🎩✨
+**Hide your secrets like a pro!** InvisioVault lets you stash files inside images using steganography, OR create mind-bending polyglot files that work as TWO formats at once. It's like magic, but with more React and Flask. ✨
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
@@ -12,362 +12,189 @@
 
 ---
 
-## ✨ Features (The Cool Stuff)
+## ✨ What Can It Do?
 
 ### 🖼️ Steganography Mode
-- 🎨 **Hide Files in Images**: Upload an image, hide your secrets inside using LSB magic
-- 📝 **Text Mode**: Too lazy to create a file? Just type your secrets directly!
-- 🔐 **Password Protection**: Encrypt your hidden files because trust no one
-- 🗜️ **Auto Compression**: We squeeze your files so they fit better (like packing for a trip)
-- 📦 **Any File Type**: PDFs, videos, your crush's photo, memes... we don't judge
+Hide files **inside** images using LSB steganography. Your image looks normal, but it's secretly carrying secret cargo!
 
-### 🔗 Polyglot Mode (The Mind-Bending Stuff)
-- 🤯 **Universal True Polyglot**: ANY format as carrier + ANY format hidden inside!
-  - Upload a JPG and hide a PDF? ✅ PNG and hide a video? ✅ MP4 and hide documents? ✅
-  - No manual zipping required - we handle EVERYTHING automatically!
-- 🎪 **Any Format Combination**: Images, PDFs, videos, executables, audio - mix and match freely
-  - Carrier file: JPG, PNG, GIF, PDF, MP4, AVI, MP3... you name it!
-  - Hidden file: Literally ANY file type - documents, code, media, archives, whatever!
-- 🔒 **AES-256 Encryption**: Password-protect your hidden files (military-grade security!)
-- 🎬 **Carrier Stays Functional**: Your image still opens, your PDF still works, pure magic!
-- 🚀 **Zero Manual Work**: Upload both files, we handle compression and polyglot creation
+- **Hide Files or Text** - Upload a file OR just type your secrets directly
+- **Password Protection** - Encrypt your hidden data (trust no one 🔐)
+- **Auto Compression** - We squeeze files to fit better
+- **Smart Capacity Calculator** - Know before you go! Real-time indicator shows if your file will fit
+- **Any File Type** - PDFs, videos, memes... we don't judge
 
-### 🎯 General Awesomeness
-- 🌙 **Dark Mode by Default**: Because we're not savages
-- 👁️ **Password Toggle**: See what you're typing (or hide it from shoulder surfers)
-- 📱 **Responsive Design**: Works on your phone, tablet, potato... whatever
-- 🚀 **RESTful API**: Integrate it into your own projects if you're feeling adventurous
-- ✅ **File Integrity**: Get your files back EXACTLY as you hid them
-- 🎮 **Easy Mode**: We made it so simple, your grandma could use it (no offense, grandma)
+### 🔗 Polyglot Mode
+Create files that work as **TWO formats at once**. Open it as an image? Image. Rename to .zip? BAM, hidden files!
+
+- **Any Format Combination** - Images, PDFs, videos, whatever + whatever
+- **AES-256 Encryption** - Password protection with military-grade security
+- **Carrier Stays Functional** - Your original file works perfectly
+- **Zero Manual Work** - We handle compression and polyglot creation automatically
+
+### 🎯 The Nice-to-Haves
+- 🌙 **Dark Mode** - Because we respect your retinas
+- 👁️ **Password Toggle** - See what you're typing (or hide from shoulder surfers)
+- � **Capacity Analysis** - Color-coded progress bars show exactly how much space you're using
+- �📱 **Responsive** - Works on phones, tablets, whatever
+- 🚀 **RESTful API** - Integrate into your own projects
 
 ---
 
-## 🏗️ Project Structure
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.8+
+- Node.js 16+
+
+### Easy Mode (Windows)
+Just run the `run.bat` file. It'll start both servers in separate windows!
+
+### Manual Setup
+
+**Backend:**
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # Mac/Linux
+pip install -r requirements.txt
+cp .env.example .env
+python app.py
+```
+Backend runs on `http://localhost:5000`
+
+**Frontend:**
+```bash
+cd frontend
+npm install
+cp .env.example .env
+npm run dev
+```
+Frontend runs on `http://localhost:5173`
+
+---
+
+## 🎯 How to Use
+
+### Hiding Files in Images
+1. Pick **Steganography** mode
+2. Choose an image (your innocent cover)
+3. Upload a file OR type text
+4. Optional: Add password for extra security
+5. Check the **capacity indicator** - it'll tell you if it fits!
+6. Click "Hide File"
+7. Download your suspiciously-normal-looking image
+
+### Creating Polyglot Files
+1. Pick **Polyglot** mode
+2. Upload carrier file (any format!)
+3. Upload file to hide (any format!)
+4. Optional: Add password
+5. Click create
+6. Download your brain-melting dual-format file
+7. Open normally = carrier works. Rename to `.zip` = hidden file appears!
+
+---
+
+## 🛠️ Tech Stack
+
+**Backend:** Flask, Pillow, Cryptography, Pyzipper  
+**Frontend:** React, Vite, Axios  
+**Special Sauce:** LSB Steganography, AES-256 Encryption
+
+---
+
+## 🔒 Security Features
+
+- ✅ File validation (no sneaky stuff)
+- ✅ Size limits (64 MB max)
+- ✅ Rate limiting (100 req/hour - we bumped it for the capacity calculator!)
+- ✅ Password encryption (Fernet + AES-256)
+- ✅ Auto cleanup (we're tidy)
+- ✅ Path traversal prevention
+
+---
+
+## � New Feature: Interactive Capacity Calculator
+
+Our latest addition shows you **real-time** if your file will fit before hiding it!
+
+- 📈 Visual progress bar with color coding
+- ✅ Green: "File will fit comfortably"
+- 🟡 Yellow: "High capacity, but you're good"
+- 🔴 Red: "Nope, too big buddy"
+- 🧮 Shows exact sizes and percentages
+- ⚡ Smart debouncing (500ms) to prevent API spam
+
+No more trial-and-error! The calculator tells you upfront if your secret will fit in your carrier.
+
+---
+
+## 📁 Project Structure
 
 ```
 InvisioVault/
-├── backend/                    # Flask REST API
-│   ├── api/                   # API routes
-│   │   └── routes.py         # Endpoint definitions
-│   ├── config/               # Configuration
-│   │   └── settings.py       # App settings
-│   ├── utils/                # Utilities
-│   │   ├── steganography.py  # Core steganography logic
-│   │   ├── polyglot.py       # Polyglot file magic
-│   │   └── validators.py     # File validation
-│   ├── app.py                # Flask application factory
-│   ├── requirements.txt      # Python dependencies
-│   └── .env.example          # Environment variables template
-│
-├── frontend/                  # React SPA
-│   ├── src/
-│   │   ├── components/       # React components
-│   │   │   ├── HideFile.jsx
-│   │   │   ├── HideFile.css
-│   │   │   ├── ExtractFile.jsx
-│   │   │   ├── ExtractFile.css
-│   │   │   ├── Polyglot.jsx
-│   │   │   └── Polyglot.css
-│   │   ├── App.jsx           # Main application
-│   │   ├── App.css           # Global styles
-│   │   └── main.jsx          # Entry point
-│   ├── package.json          # Node dependencies
-│   └── .env.example          # Frontend env template
-│
-├── .gitignore                # Git ignore rules
-└── README.md                 # This file
+├── backend/              # Flask API
+│   ├── api/             # Routes
+│   ├── utils/           # Steganography, polyglot magic
+│   └── app.py           # Main app
+├── frontend/            # React SPA
+│   └── src/
+│       ├── components/  # HideFile, ExtractFile, Polyglot, CapacityIndicator
+│       └── App.jsx
+└── run.bat             # Easy start script (Windows)
 ```
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- **Python** 3.8 or higher
-- **Node.js** 16 or higher
-- **npm** or **yarn**
-
-### Backend Setup
-
-1. **Navigate to backend directory**:
-   ```bash
-   cd backend
-   ```
-
-2. **Create virtual environment**:
-   ```bash
-   python -m venv venv
-   ```
-
-3. **Activate virtual environment**:
-   - Windows: `venv\Scripts\activate`
-   - macOS/Linux: `source venv/bin/activate`
-
-4. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-5. **Create `.env` file** (copy from `.env.example`):
-   ```bash
-   cp .env.example .env
-   ```
-
-6. **Run the backend**:
-   ```bash
-   python app.py
-   ```
-   Backend will run on `http://localhost:5000`
-
-### Frontend Setup
-
-1. **Navigate to frontend directory**:
-   ```bash
-   cd frontend
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-
-3. **Create `.env` file** (copy from `.env.example`):
-   ```bash
-   cp .env.example .env
-   ```
-
-4. **Run the development server**:
-   ```bash
-   npm run dev
-   ```
-   Frontend will run on `http://localhost:5173`
-
-### Quick Start (Both Services)
-
-You can run both backend and frontend simultaneously in separate terminals:
-
-**Terminal 1** (Backend):
-```bash
-cd backend
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # macOS/Linux
-python app.py
-```
-
-**Terminal 2** (Frontend):
-```bash
-cd frontend
-npm run dev
-```
-
-Then open `http://localhost:5173` in your browser and start hiding stuff!
-
----
-
-## 🎯 How to Use (It's Almost Too Easy)
-
-### 🖼️ Steganography Mode
-
-**Hiding Stuff:**
-1. Pick **🖼️ Steganography** mode
-2. Choose **"Hide File"** or **"Hide Text"** (because options are nice)
-3. Upload your cover image (the innocent-looking one)
-4. Upload your file OR type your secret message
-5. (Optional) Add a password because paranoia is healthy
-6. Click **"Hide File"**
-7. Download your now-suspicious-looking-but-totally-innocent image
-
-**Extracting Stuff:**
-1. Upload the image with hidden secrets
-2. Enter password if you used one (or watch it fail dramatically)
-3. Click **"Extract File"**
-4. Your file magically appears! (It's not magic, it's math, but shh...)
-5. If it's text, we'll show it on screen like fancy people
-
-### 🔗 Polyglot Mode (The "Wait, What?" Mode)
-
-**Creating a Polyglot:**
-1. Pick **🔗 Polyglot** mode
-2. Choose **"Create Polyglot"**
-3. Upload your carrier file - **ANY format works!** (JPG, PNG, PDF, MP4, GIF, MP3, you name it)
-4. Upload the file you want to hide - **ANY format!** (PDF, video, documents, code, archives, whatever)
-5. (Optional) Add a password for extra security points
-6. Click create - **we automatically compress and create the polyglot for you!**
-7. Download the polyglot file
-8. **Mind = Blown:** The file works as BOTH formats!
-   - Open it normally → carrier file works perfectly
-   - Rename to `.zip` and open → hidden file inside!
-
-**Extracting from Polyglot:**
-1. Choose **"Extract from Polyglot"**
-2. Upload the polyglot file (any carrier format)
-3. Enter password if needed
-4. Get your hidden file back in its original format
-
-*Pro tip: You can also just rename the polyglot to `.zip` and use WinRAR/7-Zip like a normal person*
-
-**🎯 The Magic:** No manual zipping, no format restrictions - just upload ANY two files and we create a working polyglot that functions as both! That's true universal polyglot capability.
-
----
-
-## 🔌 API Endpoints
-
-### Health Check
-```http
-GET /api/health
-```
-Returns API status
-
-### Hide File
-```http
-POST /api/hide
-Content-Type: multipart/form-data
-
-Body:
-  - image: Image file
-  - file: File to hide
-
-Response:
-{
-  "success": true,
-  "message": "File hidden successfully",
-  "download_id": "random_id.png"
-}
-```
-
-### Download Image
-```http
-GET /api/download/<download_id>
-```
-Download the image with hidden file
-
-### Extract File
-```http
-POST /api/extract
-Content-Type: multipart/form-data
-
-Body:
-  - image: Image file with hidden data
-
-Response: Binary file download
-```
-
----
-
-## 🛠️ Technology Stack (The Nerdy Bits)
-
-### Backend (The Brain)
-- **Flask** - Web framework (lightweight but mighty)
-- **Flask-CORS** - So frontend and backend can be friends
-- **Pillow** - Image wizardry
-- **Cryptography** - For that sweet password encryption
-- **Pyzipper** - AES-256 encrypted ZIPs (because standard ZIP encryption is from the Stone Age)
-- **Python zlib** - Compression that actually works
-
-### Frontend (The Pretty Face)
-- **React** - Because jQuery is so 2010
-- **Vite** - Fast as lightning ⚡
-- **Axios** - HTTP requests made easy
-- **CSS3** - Dark mode, animations, all the eye candy
-
----
-
-## 🔒 Security Features (We Take This Seriously... Mostly)
-
-- ✅ **File type validation** - No sneaky executables disguised as images
-- ✅ **Size limits** - 64 MB max because we're not made of RAM
-- ✅ **Path traversal prevention** - Nice try, hacker
-- ✅ **Password encryption** - Fernet for stego, AES-256 for polyglots
-- ✅ **CORS configuration** - Only talk to people we trust
-- ✅ **Secure file naming** - Random tokens because predictable names are boring
-- ✅ **Automatic cleanup** - We delete temp files like responsible adults
-- ✅ **Data length tracking** - No buffer overflow shenanigans here
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Here's how you can help:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-## 📝 Environment Variables
-
-### Backend (.env)
-```env
-FLASK_ENV=development
-DEBUG=True
-SECRET_KEY=your-secret-key
-UPLOAD_FOLDER=uploads
-CORS_ORIGINS=http://localhost:5173
-PORT=5000
-LOG_LEVEL=INFO
-```
-
-### Frontend (.env)
-```env
-VITE_API_URL=http://localhost:5000
-```
+Pull requests welcome! Just:
+1. Fork it
+2. Make it better
+3. Send a PR with a funny commit message (we appreciate the vibes)
 
 ---
 
 ## 📜 License
 
-This project is licensed under the MIT License. Feel free to use, modify, and distribute.
+MIT License - do whatever you want with it!
 
 ---
 
 ## 👨‍💻 Author
 
-**Rolan**
-- Email: rolanlobo901@gmail.com
-- GitHub: [@Mrtracker-new](https://github.com/Mrtracker-new)
+**Rolan**  
+📧 rolanlobo901@gmail.com  
+🐙 [@Mrtracker-new](https://github.com/Mrtracker-new)
 
 ---
 
 ## ⚠️ Disclaimer
 
-InvisioVault is intended for educational and personal use. Always ensure ethical and legal compliance when hiding sensitive information. The author is not responsible for any misuse of this software.
-
----
-
-## 🙏 Acknowledgments
-
-- Built with modern web technologies
-- Inspired by the need for simple, secure file hiding
-- Thanks to the open-source community
+Use responsibly! This is for educational and personal use. Don't hide illegal stuff. The author is not responsible for your shenanigans.
 
 ---
 
 ## 🎉 Thank You!
 
-Your journey into modern steganography starts here. Let InvisioVault redefine how you secure and share data.
+**Star ⭐ this repo if you find it useful!**
 
-**Star ⭐ this repository if you find it useful!**
+May your files stay hidden and your secrets stay secret! 🤫
 
 ---
 
-## 😅 A Funny Little Story (From the Creator)
+## � Fun Fact
 
-So... funny story. This was actually my **first ever repo**! 🎉
+This was my **first ever repo**! Looking back at the original code is... an experience. Let's just say past-me had enthusiasm and caffeine, but not much else.
 
-Back then, I had absolutely NO idea what I was doing. Like, zero. Zilch. Nada. I just woke up one day and thought, "Hey, wouldn't it be cool to hide files in images?" and somehow... this happened? 🤷‍♂️
+After learning how to actually code, I came back and gave this thing a complete makeover:
+- Separated frontend/backend (revolutionary!)
+- Added polyglot files (because why not)
+- Threw in encryption (security!)
+- Made it dark mode (my eyes say thanks)
+- Added the capacity calculator (no more guessing games!)
 
-Honestly, I don't even remember HOW I created it. I was just throwing code at the wall and praying something would stick. The deployment? Pure chaos. The code structure? A beautiful disaster. Everything was held together with duct tape, hope, and probably too much caffeine.
+If you're a beginner: **keep building!** Your first project doesn't need to be perfect. Mine definitely wasn't. Just code, break things, and learn! 💪
 
-But hey, it worked! (Sort of. Most of the time. When the stars aligned.)
-
-Now, after actually learning how to code properly, I came back to this project like "Wow... I really made THIS?" So I gave it a complete makeover - separated the frontend and backend, cleaned up the mess, made it actually maintainable, added POLYGLOT FILES (because apparently one way to hide files wasn't enough), threw in some password encryption, made it dark mode because my eyes deserve better, and turned it into something I'm genuinely proud of!
-
-If you're a beginner reading this: **keep going!** Your first project doesn't have to be perfect. Mine certainly wasn't. Just build stuff, break things, and learn along the way. That's how we all started! 💪
-
-Feel free to clone this repo and use it however you want. Who knows, maybe you'll come back in a year and refactor it even better than I did! 😄
-
-*P.S. - If you find any remnants of my "beginner code" still hiding somewhere, just... pretend you didn't see it. Thanks.* 😬
+*P.S. - If you find any ancient code artifacts from the Before Times, just... look away. Thanks.* �
