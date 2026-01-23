@@ -26,12 +26,6 @@ services:
         value: app.log
       - key: CORS_ORIGINS
         sync: false
-    # Health check configuration optimized for free tier
+    # Health check configuration
     healthCheckPath: /api/health
-    # Wait 30 seconds before first health check (allows cold start)
-    healthCheckInitialDelaySeconds: 30
-    # Timeout for each health check request
-    healthCheckTimeoutSeconds: 10
-    # Interval between health checks
-    healthCheckIntervalSeconds: 10
     autoDeploy: true
