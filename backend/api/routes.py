@@ -64,6 +64,68 @@ def health_check():
     return jsonify({'status': 'ok', 'message': 'InvisioVault API is running'}), 200
 
 
+@api.route('/calculate-capacity', methods=['POST'])
+def calculate_capacity():
+    """Calculate the available steganography capacity for an image."""
+    try:
+        # Validate request
+        image = request.files.get('image')
+        
+        if not image:
+            return jsonify({'error': 'Image file is required'}), 400
+        
+        # Validate image
+        validate_image(image)
+        
+        # Save image temporarily
+        upload_folder = current_app.config['UPLOAD_FOLDER']
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        image_filename = secure_filename(image.filename)
+        image_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{image_filename}")
+        image.save(image_path)
+        
+        try:
+            # Open image and calculate capacity
+            from PIL import Image
+            img = Image.open(image_path).convert("RGB")
+            total_pixels = len(list(img.getdata()))
+            
+            # Capacity calculation: 3 bits per pixel (1 bit per RGB channel)
+            # Divided by 8 to convert bits to bytes
+            total_capacity_bytes = (total_pixels * 3) // 8
+            
+            # Format for display
+            def format_bytes(bytes_val):
+                if bytes_val < 1024:
+                    return f"{bytes_val} Bytes"
+                elif bytes_val < 1024 * 1024:
+                    return f"{bytes_val / 1024:.1f} KB"
+                else:
+                    return f"{bytes_val / (1024 * 1024):.1f} MB"
+            
+            logger.info(f"Calculated capacity for image: {total_capacity_bytes} bytes")
+            
+            return jsonify({
+                'totalCapacityBytes': total_capacity_bytes,
+                'totalCapacityFormatted': format_bytes(total_capacity_bytes)
+            }), 200
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(image_path):
+                os.remove(image_path)
+    
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 400
+    except Exception as e:
+        logger.error(f"Error calculating capacity: {str(e)}")
+        safe_error = sanitize_error('An error occurred while calculating capacity', current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 500
+
+
 @api.route('/hide', methods=['POST'])
 def hide_file():
     """Hide a file in an image."""
