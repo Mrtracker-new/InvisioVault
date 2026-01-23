@@ -2,6 +2,7 @@ import { useState } from 'react'
 import axios from 'axios'
 import './HideFile.css'
 import API_URL from '../config/api'
+import CapacityIndicator from './CapacityIndicator'
 
 function HideFile() {
   const [mode, setMode] = useState('file') // 'file' or 'text'
@@ -24,12 +25,12 @@ function HideFile() {
       setError('Please select an image')
       return
     }
-    
+
     if (mode === 'file' && !file) {
       setError('Please select a file to hide')
       return
     }
-    
+
     if (mode === 'text' && !text.trim()) {
       setError('Please enter some text to hide')
       return
@@ -40,13 +41,13 @@ function HideFile() {
     try {
       const formData = new FormData()
       formData.append('image', image)
-      
+
       if (mode === 'file') {
         formData.append('file', file)
       } else {
         formData.append('text', text)
       }
-      
+
       if (password) {
         formData.append('password', password)
       }
@@ -174,6 +175,17 @@ function HideFile() {
             </div>
             {password && <p className="file-name">🔐 File will be password-protected</p>}
           </div>
+
+          {/* Capacity Indicator */}
+          {image && (file || text) && (
+            <CapacityIndicator
+              carrierFile={image}
+              hiddenFile={mode === 'file' ? file : null}
+              hiddenText={mode === 'text' ? text : ''}
+              mode="stego"
+              password={password}
+            />
+          )}
 
           {error && <div className="error-message">{error}</div>}
 
