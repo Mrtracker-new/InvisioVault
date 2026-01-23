@@ -5,8 +5,10 @@ services:
     runtime: python
     plan: free
     rootDir: backend
+    # Specify Python version for consistency
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 2 --timeout 120 --bind 0.0.0.0:$PORT
+    # Use 1 worker for free tier stability (less memory, faster startup)
+    startCommand: gunicorn app:app --workers 1 --timeout 120 --bind 0.0.0.0:$PORT --log-level info
     envVars:
       - key: FLASK_ENV
         value: production
@@ -24,5 +26,12 @@ services:
         value: app.log
       - key: CORS_ORIGINS
         sync: false
+    # Health check configuration optimized for free tier
     healthCheckPath: /api/health
+    # Wait 30 seconds before first health check (allows cold start)
+    healthCheckInitialDelaySeconds: 30
+    # Timeout for each health check request
+    healthCheckTimeoutSeconds: 10
+    # Interval between health checks
+    healthCheckIntervalSeconds: 10
     autoDeploy: true
