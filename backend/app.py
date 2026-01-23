@@ -42,13 +42,14 @@ def create_app(config_name='default'):
     app.logger.info(f"CORS enabled for origins: {app.config['CORS_ORIGINS']}")
     
     # Setup rate limiting to prevent abuse and DOS attacks
-    # Global limits: 200 requests per day, 50 per hour per IP
-    # Heavy operations (hide/create): 10 per hour
-    # Light operations (extract): 20 per hour
+    # Global limits: 200 requests per day, 100 per hour per IP
+    # This accommodates capacity calculator calls while still preventing abuse
+    # Heavy operations (hide/create): 10 per hour (handled by specific limits)
+    # Light operations (extract, capacity): covered by global limit
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
-        default_limits=["200 per day", "50 per hour"],
+        default_limits=["200 per day", "100 per hour"],
         storage_uri=os.getenv('REDIS_URL', 'memory://'),
         strategy="fixed-window",
         headers_enabled=True  # Add rate limit headers to responses
