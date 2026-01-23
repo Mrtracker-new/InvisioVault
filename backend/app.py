@@ -157,10 +157,19 @@ def create_app(config_name='default'):
 env = os.getenv('FLASK_ENV', 'development')
 app = create_app(env)
 
+# Log startup information for deployment debugging
+port = int(os.getenv('PORT', 5000))
+app.logger.info(f"========================================")
+app.logger.info(f"InvisioVault Backend Starting")
+app.logger.info(f"Environment: {env}")
+app.logger.info(f"Port: {port}")
+app.logger.info(f"Debug Mode: {app.config['DEBUG']}")
+app.logger.info(f"========================================")
 
 if __name__ == '__main__':
+    app.logger.info(f"Running in development mode on 0.0.0.0:{port}")
     app.run(
         host='0.0.0.0',
-        port=int(os.getenv('PORT', 5000)),
+        port=port,
         debug=app.config['DEBUG']
     )
