@@ -2,13 +2,14 @@ import { useState } from 'react'
 import HideFile from './components/HideFile'
 import ExtractFile from './components/ExtractFile'
 import Polyglot from './components/Polyglot'
+import QRCode from './components/QRCode'
 import TutorialModal from './components/TutorialModal'
 import WakeServerButton from './components/WakeServerButton'
 import './App.css'
 
 
 function App() {
-  const [mode, setMode] = useState('stego') // 'stego' or 'polyglot'
+  const [mode, setMode] = useState('stego') // 'stego', 'polyglot', or 'qrcode'
   const [activeTab, setActiveTab] = useState('hide')
   const [showTutorial, setShowTutorial] = useState(false)
 
@@ -42,6 +43,12 @@ function App() {
         >
           🔗 Polyglot
         </button>
+        <button
+          className={`mode-tab ${mode === 'qrcode' ? 'active' : ''}`}
+          onClick={() => setMode('qrcode')}
+        >
+          📱 QR Code
+        </button>
       </div>
 
       {mode === 'stego' ? (
@@ -65,9 +72,13 @@ function App() {
             {activeTab === 'hide' ? <HideFile /> : <ExtractFile />}
           </div>
         </>
-      ) : (
+      ) : mode === 'polyglot' ? (
         <div className="content">
           <Polyglot />
+        </div>
+      ) : (
+        <div className="content">
+          <QRCode />
         </div>
       )}
 
