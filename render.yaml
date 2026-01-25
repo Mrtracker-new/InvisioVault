@@ -6,7 +6,10 @@ services:
     plan: free
     rootDir: backend
     # Specify Python version for consistency
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      # Install system dependencies for pyzbar (QR code scanning)
+      apt-get update && apt-get install -y libzbar0 zbar-tools
+      pip install -r requirements.txt
     # Use 1 worker for free tier stability (less memory, faster startup)
     startCommand: gunicorn app:app --workers 1 --timeout 120 --bind 0.0.0.0:$PORT --log-level info
     envVars:
