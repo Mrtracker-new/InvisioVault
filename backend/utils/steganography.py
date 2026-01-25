@@ -119,9 +119,10 @@ def hide_file_in_image(image_path: str, file_path: str, output_path: str, passwo
                     data_index += 1
         host_pixels[i] = tuple(pixel)
 
-    # Save the modified image
+    # Save the modified image with maximum compatibility
+    # Use optimize=False and compress_level=0 to prevent any lossy operations
     host_img.putdata(host_pixels)
-    host_img.save(output_path, 'PNG')
+    host_img.save(output_path, 'PNG', optimize=False, compress_level=0)
     return output_path
 
 
