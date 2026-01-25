@@ -7,3 +7,7 @@ python-dotenv==1.0.1
 cryptography==42.0.5
 pyzipper==0.3.6
 gunicorn==21.2.0
+segno==1.6.1
+pyzbar==0.1.9
+pypng==0.20220715.0
+
