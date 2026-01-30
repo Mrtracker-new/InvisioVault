@@ -79,14 +79,11 @@ function QRCode() {
         setExtractError('Camera error: ' + err.message)
     }
 
-    const { videoRef, canvasRef, error: scanError, isScanning: cameraActive, reset: resetScanner } = useQRScanner(
+    const { videoRef, canvasRef, error: scanError, isScanning: cameraActive, reset: resetScanner, boundingBox } = useQRScanner(
         isScanning,
         handleQRDetected,
         handleScanError
     )
-
-    // Remove old useEffect that was based on qrData
-    // The hook now calls handleQRDetected directly when QR is found
 
     const handleGenerate = async (e) => {
         e.preventDefault()
@@ -402,13 +399,38 @@ function QRCode() {
                                         <video ref={videoRef} autoPlay playsInline className="camera-video" />
                                         <canvas ref={canvasRef} style={{ display: 'none' }} />
 
+                                        {/* Dynamic Bounding Box Overlay */}
+                                        {cameraActive && boundingBox && videoRef.current && (
+                                            <svg
+                                                className="qr-overlay"
+                                                viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
+                                                style={{
+                                                    position: 'absolute',
+                                                    top: 0,
+                                                    left: 0,
+                                                    width: '100%',
+                                                    height: '100%',
+                                                    pointerEvents: 'none',
+                                                    zIndex: 10
+                                                }}
+                                            >
+                                                <path
+                                                    d={`M${boundingBox.topLeftCorner.x},${boundingBox.topLeftCorner.y} L${boundingBox.topRightCorner.x},${boundingBox.topRightCorner.y} L${boundingBox.bottomRightCorner.x},${boundingBox.bottomRightCorner.y} L${boundingBox.bottomLeftCorner.x},${boundingBox.bottomLeftCorner.y} Z`}
+                                                    fill="rgba(0, 255, 0, 0.2)"
+                                                    stroke="#00FF00"
+                                                    strokeWidth="4"
+                                                    strokeLinejoin="round"
+                                                />
+                                            </svg>
+                                        )}
+
                                         {!cameraActive && !scanError && (
                                             <div className="camera-placeholder">
                                                 <p>📷 Starting camera...</p>
                                             </div>
                                         )}
 
-                                        {cameraActive && (
+                                        {cameraActive && !boundingBox && (
                                             <div className="scanning-overlay">
                                                 <div className="scan-frame"></div>
                                                 <p className="scan-hint">📱 Point your camera at a QR code</p>
