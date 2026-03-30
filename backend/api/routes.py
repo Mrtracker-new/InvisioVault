@@ -263,12 +263,15 @@ def extract_file():
         output = BytesIO(file_data)
         output.seek(0)
 
-        logger.info(f"Successfully extracted file: {original_filename}")
+        # Sanitize filename from untrusted stego metadata to prevent
+        # Content-Disposition header injection / path traversal (P0-03)
+        safe_filename = secure_filename(original_filename) or 'extracted_file'
+        logger.info(f"Successfully extracted file: {safe_filename}")
         return send_file(
             output,
             mimetype=mime_type,
             as_attachment=True,
-            download_name=original_filename
+            download_name=safe_filename
         )
 
     except ValueError as e:
@@ -388,11 +391,14 @@ def extract_from_polyglot_file():
         output = BytesIO(file_data)
         output.seek(0)
 
-        logger.info(f"Successfully extracted from polyglot: {original_filename}")
+        # Sanitize filename from untrusted ZIP/polyglot metadata to prevent
+        # Content-Disposition header injection / path traversal (P0-03)
+        safe_filename = secure_filename(original_filename) or 'extracted_file'
+        logger.info(f"Successfully extracted from polyglot: {safe_filename}")
         return send_file(
             output,
             as_attachment=True,
-            download_name=original_filename
+            download_name=safe_filename
         )
 
     except ValueError as e:
