@@ -155,17 +155,56 @@ def extract_from_polyglot(polyglot_path: str, password: str = None) -> Tuple[byt
         with open(polyglot_path, 'rb') as f:
             data = f.read()
         
-        # Look for ZIP signature (PK\x03\x04 or PK\x05\x06 for empty archives)
-        # We look for the central directory end signature which is at the end
-        zip_signature = b'PK\x03\x04'
-        
-        # Find the first occurrence of ZIP signature
-        zip_start = data.find(zip_signature)
-        
-        if zip_start == -1:
-            raise ValueError("No hidden file found in the polyglot")
-        
-        # Extract the ZIP portion
+        # Locate the hidden ZIP using the End of Central Directory (EOCD) record.
+        # We must NOT use data.find(b'PK\x03\x04') because the carrier itself may be
+        # a ZIP-based format (DOCX, XLSX, APK, JAR, ODP, ODT …) whose own PK\x03\x04
+        # magic bytes appear at offset 0, causing silent data corruption on extraction.
+        #
+        # Strategy (mirrors what _fix_zip_offsets writes during creation):
+        #   1. Locate the EOCD record (PK\x05\x06) by scanning from the END of the file.
+        #   2. Read the central-directory (CD) start offset stored at EOCD+16.
+        #      _fix_zip_offsets already adjusted this offset to be absolute in the
+        #      polyglot file, so it points directly into the hidden ZIP region.
+        #   3. Walk every CD file-header entry and collect the local-header offsets
+        #      stored at CD_entry+42; the minimum value is the first byte of the
+        #      hidden ZIP's local file data — i.e., the true zip_start.
+        #   4. Fall back to the CD offset itself if no entries are found (empty ZIP).
+
+        eocd_sig = b'PK\x05\x06'
+        eocd_pos = data.rfind(eocd_sig)
+
+        if eocd_pos == -1:
+            raise ValueError("No hidden file found in the polyglot (EOCD signature missing)")
+
+        # Sanity-check: EOCD record is at least 22 bytes
+        if len(data) - eocd_pos < 22:
+            raise ValueError("No hidden file found in the polyglot (EOCD record truncated)")
+
+        # CD offset is at EOCD + 16 (little-endian uint32)
+        cd_offset = int.from_bytes(data[eocd_pos + 16: eocd_pos + 20], 'little')
+
+        # Walk the central directory to find the earliest local-header offset
+        local_offsets = []
+        cd_pos = cd_offset
+        cd_sig = b'PK\x01\x02'
+
+        while cd_pos + 46 <= len(data) and data[cd_pos: cd_pos + 4] == cd_sig:
+            local_hdr_offset = int.from_bytes(data[cd_pos + 42: cd_pos + 46], 'little')
+            local_offsets.append(local_hdr_offset)
+
+            name_len    = int.from_bytes(data[cd_pos + 28: cd_pos + 30], 'little')
+            extra_len   = int.from_bytes(data[cd_pos + 30: cd_pos + 32], 'little')
+            comment_len = int.from_bytes(data[cd_pos + 32: cd_pos + 34], 'little')
+            cd_pos += 46 + name_len + extra_len + comment_len
+
+        # The true start of the hidden ZIP is the smallest local-header offset.
+        # Fall back to cd_offset when the archive is empty (no entries).
+        zip_start = min(local_offsets) if local_offsets else cd_offset
+
+        if zip_start < 0 or zip_start >= len(data):
+            raise ValueError("No hidden file found in the polyglot (invalid ZIP offset)")
+
+        # Extract the ZIP portion starting at the correct absolute offset
         zip_data = data[zip_start:]
         
         # Create a temporary file to write the zip data
