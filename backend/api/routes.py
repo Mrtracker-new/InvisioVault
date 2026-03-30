@@ -634,21 +634,31 @@ def extract_qr_manual():
 
 
 @api.route('/qr/capacity', methods=['POST'])
-def calculate_qr_capacity():
+def qr_capacity():
     """Calculate steganography capacity for a QR code."""
     try:
         public_data = request.form.get('public_data', '')
         scale = int(request.form.get('scale', 15))
-        
-        capacity = qr_stego.calculate_qr_capacity(public_data, scale)
-        
+
+        capacity = calculate_qr_capacity(public_data, scale)
+
+        def format_bytes(bytes_val):
+            if bytes_val < 1024:
+                return f"{bytes_val} Bytes"
+            elif bytes_val < 1024 * 1024:
+                return f"{bytes_val / 1024:.1f} KB"
+            else:
+                return f"{bytes_val / (1024 * 1024):.1f} MB"
+
         return jsonify({
-            'totalCapacityBytes': capacity_bytes,
-            'totalCapacityFormatted': format_bytes(capacity_bytes)
+            'totalCapacityBytes': capacity,
+            'totalCapacityFormatted': format_bytes(capacity)
         }), 200
-    
+
     except Exception as e:
-        return jsonify({'error': sanitize_error(str(e))}), 400
+        logger.error(f"Error calculating QR capacity: {str(e)}")
+        safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 400
 
 
 @api.route('/qr/detect', methods=['POST'])
