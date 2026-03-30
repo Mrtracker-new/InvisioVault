@@ -711,12 +711,12 @@ def detect_qr():
         
         # Try to decode QR code
         try:
-            from pyzbar.pyzbar import decode as pyzbar_decode
             from PIL import Image
+            import zxingcpp
             
             # Open and decode the image
             img = Image.open(filepath)
-            decoded_objects = pyzbar_decode(img)
+            decoded_objects = zxingcpp.read_barcodes(img)
             detected = len(decoded_objects) > 0
             
             if detected:
