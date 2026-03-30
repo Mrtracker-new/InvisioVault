@@ -34,9 +34,11 @@ function QRCode() {
     // Camera scanner with callbacks
     const isScanning = activeTab === 'extract' && scanMode === 'camera'
 
-    const handleQRDetected = async (blob) => {
+    const handleQRDetected = async ({ blob, rawQrData }) => {
         // QR detected from camera - now extract hidden data
-        console.log('[QRCode Component] QR detected from camera, extracting data...')
+        // rawQrData contains the decoded QR string from the client-side jsQR scan;
+        // it is available for future use but the server re-derives it from the image.
+        console.log('[QRCode Component] QR detected from camera, extracting data...', rawQrData)
         try {
             setExtractLoading(true)
             setExtractError('')

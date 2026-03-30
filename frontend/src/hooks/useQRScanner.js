@@ -145,12 +145,11 @@ export function useQRScanner(isActive, onQRDetected, onError) {
                 setBoundingBox(code.location)
 
                 if (onQRDetectedRef.current) {
-                    // Create a blob with the raw data attached to maintain compatibility
-                    // The component treats this blob as 'scanned-qr.png'
+                    // Pass a wrapper so callers can access both the image blob
+                    // and the decoded QR string without mutating the native Blob object.
                     canvas.toBlob((blob) => {
                         if (blob) {
-                            blob.rawQrData = code.data
-                            onQRDetectedRef.current(blob)
+                            onQRDetectedRef.current({ blob, rawQrData: code.data })
                         }
                     })
                 }
