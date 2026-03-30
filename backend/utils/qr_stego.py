@@ -66,7 +66,7 @@ def generate_qr_with_stego(
                 algorithm=hashes.SHA256(),
                 length=32,
                 salt=salt,
-                iterations=100000,
+                iterations=480000,  # OWASP 2023+ recommendation
                 backend=default_backend()
             )
             key = kdf.derive(password.encode('utf-8'))
@@ -253,7 +253,7 @@ def extract_from_qr_stego(
                             algorithm=hashes.SHA256(),
                             length=32,
                             salt=salt,
-                            iterations=100000,
+                            iterations=480000,  # OWASP 2023+ recommendation
                             backend=default_backend()
                         )
                         key = kdf.derive(password.encode('utf-8'))
