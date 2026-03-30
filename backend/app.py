@@ -112,7 +112,24 @@ def create_app(config_name='default'):
     
     # Register blueprints
     app.register_blueprint(api)
-    
+
+    # Apply a dedicated, tighter rate limit to /qr/detect.
+    # The camera scanner polls this endpoint every 500 ms (≈ 120 req/min at 2 fps).
+    # Without a per-route cap, a single IP can exhaust the global 100/hour budget
+    # entirely through this one endpoint, blocking all other operations.
+    # 60 req/min leaves headroom for normal 2-fps scanning while blocking floods.
+    from api.routes import detect_qr  # import the view function by name
+    limiter.limit("60 per minute")(detect_qr)
+
+    # Return clean JSON on rate-limit breach so clients (including the camera
+    # scanner) can handle 429s gracefully instead of receiving an HTML error page.
+    @app.errorhandler(429)
+    def rate_limit_exceeded(e):
+        return {
+            'error': 'Too many requests. Please slow down.',
+            'retry_after': e.description
+        }, 429
+
     # Create upload folder
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     

@@ -654,9 +654,11 @@ def calculate_qr_capacity():
 @api.route('/qr/detect', methods=['POST'])
 def detect_qr():
     """Quick QR detection endpoint for camera scanner - just checks if QR exists.
-    
-    This endpoint is called frequently by the camera scanner (every 500ms),
-    so it's designed to be fast and return consistent responses even on errors.
+
+    This endpoint is polled at up to 2 fps by the camera scanner (every 500ms).
+    A dedicated rate limit of 60 requests/minute per IP is applied via the
+    limiter in create_app() (see app.py) to prevent camera-flood attacks from
+    exhausting the global daily/hourly budget and starving other endpoints.
     """
     filepath = None
     try:
