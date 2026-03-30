@@ -58,20 +58,6 @@ def create_app(config_name='default'):
     # Store limiter in app for use in routes
     app.limiter = limiter
     
-    # Request size validation middleware
-    @app.before_request
-    def validate_request_size():
-        """Validate request content length before processing to prevent DoS attacks."""
-        if request.method in ['POST', 'PUT', 'PATCH']:
-            content_length = request.content_length
-            max_length = app.config.get('MAX_CONTENT_LENGTH')
-            
-            if content_length and max_length and content_length > max_length:
-                from flask import jsonify
-                return jsonify({
-                    'error': f'Request too large. Maximum size is {max_length // (1024*1024)} MB'
-                }), 413
-    
     # Setup logging
     logging.basicConfig(
         level=getattr(logging, app.config['LOG_LEVEL']),
