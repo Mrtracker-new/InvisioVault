@@ -99,9 +99,13 @@ def create_app(config_name='default'):
         response.headers['Content-Security-Policy'] = csp
         
         # Permissions Policy - restrict browser features
+        # Note: camera=() and microphone=() are intentionally omitted here.
+        # This is a REST API — its responses must not restrict getUserMedia on
+        # the frontend document. Browsers (Chrome especially) propagate
+        # Permissions-Policy from fetch/XHR responses to the parent document,
+        # which would silently block the QR camera scanner.
         response.headers['Permissions-Policy'] = (
-            'geolocation=(), microphone=(), camera=(), '
-            'payment=(), usb=(), magnetometer=(), gyroscope=()'
+            'geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=()'
         )
         
         # HSTS - Force HTTPS (only in production with HTTPS)
