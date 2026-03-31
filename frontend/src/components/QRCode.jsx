@@ -460,7 +460,7 @@ function QRCode() {
                             {scanMode === 'camera' ? (
                                 <div className="camera-scanner">
                                     <div className="camera-container">
-                                        <video ref={videoRef} autoPlay playsInline className="camera-video" />
+                                        <video ref={videoRef} autoPlay playsInline muted allow="camera" className="camera-video" />
                                         <canvas ref={canvasRef} style={{ display: 'none' }} />
 
                                         {/* Dynamic Bounding Box Overlay */}
