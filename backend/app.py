@@ -98,15 +98,13 @@ def create_app(config_name='default'):
         )
         response.headers['Content-Security-Policy'] = csp
         
-        # Permissions Policy - restrict browser features
-        # Note: camera=() and microphone=() are intentionally omitted here.
-        # This is a REST API — its responses must not restrict getUserMedia on
-        # the frontend document. Browsers (Chrome especially) propagate
-        # Permissions-Policy from fetch/XHR responses to the parent document,
-        # which would silently block the QR camera scanner.
-        response.headers['Permissions-Policy'] = (
-            'geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=()'
-        )
+        # Permissions-Policy is intentionally NOT set on API responses.
+        # This header is a document-level directive: setting it on REST API
+        # responses causes Chrome to merge it with the parent document's policy,
+        # which can silently restrict browser features (including getUserMedia /
+        # camera access) even when camera=() is not explicitly listed.
+        # Feature policy for the frontend document is set in vercel.json and
+        # index.html — those are the only correct places for this header.
         
         # HSTS - Force HTTPS (only in production with HTTPS)
         if not app.config['DEBUG'] and request.is_secure:
