@@ -37,6 +37,8 @@ SAFE_ERROR_MESSAGES = {
     'generic': 'An error occurred while processing your request. Please try again.'
 }
 
+MIN_PASSWORD_LENGTH = 8
+
 
 def sanitize_error(error_message: str, is_debug: bool = False) -> str:
     """Sanitize error messages to avoid leaking internal details in production.
@@ -155,6 +157,10 @@ def hide_file():
             
         if not file_to_hide and not text_to_hide:
             return jsonify({'error': 'Either file or text is required'}), 400
+
+        # Enforce minimum password length (P2-02)
+        if password is not None and len(password) < MIN_PASSWORD_LENGTH:
+            return jsonify({'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters long'}), 400
 
         # Validate image
         validate_image(image)
@@ -296,6 +302,10 @@ def create_polyglot_file():
         if not carrier_file or not file_to_hide:
             return jsonify({'error': 'Both carrier and file are required'}), 400
 
+        # Enforce minimum password length (P2-02)
+        if password is not None and len(password) < MIN_PASSWORD_LENGTH:
+            return jsonify({'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters long'}), 400
+
         # Save files temporarily
         upload_folder = current_app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
@@ -428,6 +438,10 @@ def generate_qr_code():
         
         if not secret_text:
             return jsonify({'error': 'Secret text is required'}), 400
+
+        # Enforce minimum password length (P2-02)
+        if password is not None and len(password) < MIN_PASSWORD_LENGTH:
+            return jsonify({'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters long'}), 400
         
         # Validate colors (basic hex color validation)
         if not (fg_color.startswith('#') and len(fg_color) == 7):
