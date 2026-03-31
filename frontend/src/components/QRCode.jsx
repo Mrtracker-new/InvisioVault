@@ -31,6 +31,7 @@ function QRCode() {
     const [extractedData, setExtractedData] = useState(null)
     const [extractLoading, setExtractLoading] = useState(false)
     const [extractError, setExtractError] = useState('')
+    const [cameraError, setCameraError] = useState('')
 
     // Camera scanner with callbacks
     const isScanning = activeTab === 'extract' && scanMode === 'camera'
@@ -104,7 +105,20 @@ function QRCode() {
     }
 
     const handleScanError = (err) => {
-        setExtractError('Camera error: ' + err.message)
+        // Map raw DOMException names to user-friendly messages
+        let msg = 'Camera access failed.'
+        if (err.name === 'NotAllowedError') {
+            msg = 'Camera permission denied. Please allow camera access in your browser settings and try again.'
+        } else if (err.name === 'NotFoundError') {
+            msg = 'No camera found on this device.'
+        } else if (err.name === 'NotReadableError') {
+            msg = 'Camera is already in use by another application.'
+        } else if (err.message && err.message.includes('HTTPS')) {
+            msg = 'Camera requires a secure connection (HTTPS). You can still use \'Upload Image\' mode instead.'
+        } else if (err.message) {
+            msg = err.message
+        }
+        setCameraError(msg)
     }
 
     const { videoRef, canvasRef, error: scanError, isScanning: cameraActive, reset: resetScanner, boundingBox } = useQRScanner(
@@ -233,6 +247,7 @@ function QRCode() {
         setExtractPassword('')
         setExtractedData(null)
         setExtractError('')
+        setCameraError('')
         resetScanner()
         if (document.getElementById('qr-upload')) {
             document.getElementById('qr-upload').value = ''
@@ -487,12 +502,27 @@ function QRCode() {
                                         )}
                                     </div>
 
-                                    {scanError && (
-                                        <div className="error-message">
-                                            {scanError}
-                                            <p style={{ marginTop: '8px', fontSize: '0.875rem' }}>
-                                                Switch to "Upload Image" mode instead.
-                                            </p>
+                                    {(scanError || cameraError) && (
+                                        <div className="error-message" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                                            <span>📵 {cameraError || scanError}</span>
+                                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    className="mode-btn"
+                                                    style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                                                    onClick={() => { setCameraError(''); resetScanner() }}
+                                                >
+                                                    🔄 Try Again
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="mode-btn"
+                                                    style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                                                    onClick={() => setScanMode('upload')}
+                                                >
+                                                    📤 Switch to Upload
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
 
@@ -502,7 +532,7 @@ function QRCode() {
                                         </div>
                                     )}
 
-                                    {extractError && !scanError && (
+                                    {extractError && !scanError && !cameraError && (
                                         <div className="error-message">{extractError}</div>
                                     )}
 
