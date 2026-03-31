@@ -588,3 +588,45 @@
         box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
     }
 }
+
+/* Password Error */
+.password-error-msg {
+    margin-top: var(--space-1);
+    color: var(--accent-error);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+}
+
+/* Password Strength Meter */
+.password-strength {
+    margin-top: var(--space-2);
+}
+
+.strength-bar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: var(--space-1);
+}
+
+.strength-bar span {
+    flex: 1;
+    height: 4px;
+    border-radius: 99px;
+    background: var(--border-subtle);
+    transition: background var(--duration-fast);
+}
+
+.strength-bar.strength-weak span:nth-child(1) {
+    background: var(--accent-error);
+}
+
+.strength-bar.strength-medium span:nth-child(1),
+.strength-bar.strength-medium span:nth-child(2) {
+    background: #f59e0b;
+}
+
+.strength-bar.strength-strong span:nth-child(1),
+.strength-bar.strength-strong span:nth-child(2),
+.strength-bar.strength-strong span:nth-child(3) {
+    background: var(--accent-success);
+}
