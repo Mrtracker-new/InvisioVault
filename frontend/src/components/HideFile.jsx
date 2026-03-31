@@ -11,10 +11,36 @@ function HideFile() {
   const [text, setText] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [downloadId, setDownloadId] = useState('')
+
+  const MIN_PASSWORD_LENGTH = 8
+
+  const getPasswordStrength = (pwd) => {
+    if (!pwd) return null
+    if (pwd.length < MIN_PASSWORD_LENGTH) return 'weak'
+    const hasUpper = /[A-Z]/.test(pwd)
+    const hasLower = /[a-z]/.test(pwd)
+    const hasDigit = /\d/.test(pwd)
+    const hasSpecial = /[^A-Za-z0-9]/.test(pwd)
+    const score = [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length
+    if (pwd.length >= 12 && score >= 3) return 'strong'
+    if (pwd.length >= 8 && score >= 2) return 'medium'
+    return 'weak'
+  }
+
+  const handlePasswordChange = (e) => {
+    const val = e.target.value
+    setPassword(val)
+    if (val && val.length < MIN_PASSWORD_LENGTH) {
+      setPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+    } else {
+      setPasswordError('')
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -33,6 +59,11 @@ function HideFile() {
 
     if (mode === 'text' && !text.trim()) {
       setError('Please enter some text to hide')
+      return
+    }
+
+    if (password && password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`)
       return
     }
 
@@ -148,9 +179,10 @@ function HideFile() {
               <input
                 id="password-input"
                 type={showPassword ? "text" : "password"}
-                placeholder="Enter password to encrypt the file"
+                placeholder="Enter password to encrypt the file (min. 8 chars)"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={handlePasswordChange}
+                aria-describedby={passwordError ? 'hide-password-error' : undefined}
               />
               {password && (
                 <button
@@ -173,7 +205,22 @@ function HideFile() {
                 </button>
               )}
             </div>
-            {password && <p className="file-name">🔐 File will be password-protected</p>}
+            {passwordError && (
+              <p id="hide-password-error" className="password-error-msg">⚠️ {passwordError}</p>
+            )}
+            {password && !passwordError && (
+              <div className="password-strength">
+                <div className={`strength-bar strength-${getPasswordStrength(password)}`}>
+                  <span></span><span></span><span></span>
+                </div>
+                <p className="file-name">
+                  {getPasswordStrength(password) === 'strong' && '🔒 Strong password'}
+                  {getPasswordStrength(password) === 'medium' && '🔓 Medium strength — consider adding symbols or numbers'}
+                  {getPasswordStrength(password) === 'weak' && '⚠️ Weak password'}
+                </p>
+              </div>
+            )}
+            {password && !passwordError && <p className="file-name">🔐 File will be password-protected</p>}
           </div>
 
           {/* Capacity Indicator */}
