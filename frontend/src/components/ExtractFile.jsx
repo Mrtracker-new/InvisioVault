@@ -9,12 +9,14 @@ function ExtractFile() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
   const [extractedText, setExtractedText] = useState('')
   const [extractedFilename, setExtractedFilename] = useState('')
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setSuccessMessage('')
 
     if (!image) {
       setError('Please select an image with a hidden file')
@@ -67,7 +69,8 @@ function ExtractFile() {
         link.click()
         link.remove()
         window.URL.revokeObjectURL(url)
-        alert('File extracted successfully!')
+        setSuccessMessage(`✅ "${filename}" extracted and downloaded successfully!`)
+        setTimeout(() => setSuccessMessage(''), 4000)
       }
 
       setImage(null)
@@ -169,6 +172,7 @@ function ExtractFile() {
           </div>
         </div>
 
+        {successMessage && <div className="success-message">{successMessage}</div>}
         {error && <div className="error-message">{error}</div>}
 
         <button type="submit" disabled={loading} className="submit-button">
