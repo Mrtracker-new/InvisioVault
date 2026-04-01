@@ -15,6 +15,7 @@ function Polyglot() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [extractSuccess, setExtractSuccess] = useState('')
   const [downloadId, setDownloadId] = useState('')
 
   const MIN_PASSWORD_LENGTH = 8
@@ -90,6 +91,7 @@ function Polyglot() {
   const handleExtract = async (e) => {
     e.preventDefault()
     setError('')
+    setExtractSuccess('')
 
     if (!polyglotFile) {
       setError('Please select a polyglot file')
@@ -135,7 +137,8 @@ function Polyglot() {
       setPolyglotFile(null)
       setPassword('')
       document.getElementById('polyglot-input').value = ''
-      alert('File extracted successfully!')
+      setExtractSuccess('✅ File extracted and downloaded successfully!')
+      setTimeout(() => setExtractSuccess(''), 4000)
     } catch (err) {
       setError(err.response?.data?.error || 'An error occurred while extracting the file')
     } finally {
@@ -342,6 +345,7 @@ function Polyglot() {
             </div>
           </div>
 
+          {extractSuccess && <div className="success-message">{extractSuccess}</div>}
           {error && <div className="error-message">{error}</div>}
 
           <button type="submit" disabled={loading} className="submit-button">
