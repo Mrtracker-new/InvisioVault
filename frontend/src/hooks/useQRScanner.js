@@ -14,6 +14,7 @@ export function useQRScanner(isActive, onQRDetected, onError) {
 
     const streamRef = useRef(null)
     const animationFrameRef = useRef(null)
+    const isProcessingRef = useRef(false)
 
     // throttle scanning to avoid CPU spike
     const lastScanTimeRef = useRef(0)
@@ -140,20 +141,26 @@ export function useQRScanner(isActive, onQRDetected, onError) {
                 inversionAttempts: "dontInvert",
             })
 
-            if (code) {
+            if (code && !isProcessingRef.current) {
                 console.log('[QR Scanner] QR Code detected locally:', code.data)
                 setBoundingBox(code.location)
 
                 if (onQRDetectedRef.current) {
+                    isProcessingRef.current = true
                     // Pass a wrapper so callers can access both the image blob
                     // and the decoded QR string without mutating the native Blob object.
                     canvas.toBlob((blob) => {
                         if (blob) {
-                            onQRDetectedRef.current({ blob, rawQrData: code.data })
+                            Promise.resolve(onQRDetectedRef.current({ blob, rawQrData: code.data }))
+                                .finally(() => {
+                                    isProcessingRef.current = false
+                                })
+                        } else {
+                            isProcessingRef.current = false
                         }
                     })
                 }
-            } else {
+            } else if (!code) {
                 setBoundingBox(null)
             }
 
