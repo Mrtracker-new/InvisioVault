@@ -147,7 +147,12 @@ function Polyglot() {
   }
 
   const handleDownload = () => {
-    window.open(`${API_URL}/api/polyglot/download/${downloadId}`, '_blank')
+    const link = document.createElement('a')
+    link.href = `${API_URL}/api/polyglot/download/${downloadId}`
+    link.setAttribute('download', 'invisiovault_polyglot')
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   return (

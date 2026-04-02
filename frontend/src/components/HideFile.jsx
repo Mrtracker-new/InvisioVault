@@ -108,7 +108,12 @@ function HideFile() {
   }
 
   const handleDownload = () => {
-    window.open(`${API_URL}/api/download/${downloadId}`, '_blank')
+    const link = document.createElement('a')
+    link.href = `${API_URL}/api/download/${downloadId}`
+    link.setAttribute('download', 'invisiovault_image.png')
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   return (

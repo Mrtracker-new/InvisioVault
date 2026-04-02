@@ -183,7 +183,12 @@ function QRCode() {
     }
 
     const handleDownload = () => {
-        window.open(`${API_URL}/api/qr/download/${downloadId}`, '_blank')
+        const link = document.createElement('a')
+        link.href = `${API_URL}/api/qr/download/${downloadId}`
+        link.setAttribute('download', 'invisiovault_qrcode.png')
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
     }
 
     const handleExtract = async (e) => {
