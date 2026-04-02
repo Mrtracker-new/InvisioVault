@@ -83,11 +83,13 @@ def generate_qr_with_stego(
             
             encrypted = encryptor.update(padded_secret) + encryptor.finalize()
             
-            # Combine salt + iv + encrypted data
-            secret_payload = salt + iv + encrypted
+            # Combine flag(1) + salt(16) + iv(16) + encrypted data
+            # Flag 0x01 = encrypted, allows reliable detection without length heuristics
+            secret_payload = b'\x01' + salt + iv + encrypted
         else:
-            # No password - just encode the secret
-            secret_payload = secret_text.encode('utf-8')
+            # No password - prepend flag 0x00 to mark as plain text
+            # This replaces the unreliable len>=32 magic-number check
+            secret_payload = b'\x00' + secret_text.encode('utf-8')
         
         # Encode secret as base64
         secret_encoded = base64.b64encode(secret_payload).decode('ascii')
@@ -237,16 +239,28 @@ def extract_from_qr_stego(
                     secret_payload = base64.b64decode(secret_encoded)
                     logger.info(f"Decoded secret payload: {len(secret_payload)} bytes")
                     
-                    # Check if it's encrypted (has salt + iv + data)
-                    if password:
-                        if len(secret_payload) < 32:  # salt(16) + iv(16)
+                    # Read the explicit 1-byte encryption flag
+                    # 0x01 = AES-encrypted (salt+iv+ciphertext follow)
+                    # 0x00 = plain UTF-8 text
+                    if len(secret_payload) < 1:
+                        raise ValueError("Invalid payload: missing encryption flag byte")
+                    
+                    is_encrypted = secret_payload[0] == 0x01
+                    payload_body = secret_payload[1:]
+                    
+                    if is_encrypted:
+                        if not password:
+                            logger.warning("Payload is encrypted but no password was provided")
+                            raise ValueError("This QR code is password protected")
+                        
+                        if len(payload_body) < 32:  # salt(16) + iv(16)
                             raise ValueError("Invalid encrypted data format")
                         
                         logger.info("Decrypting with password...")
                         # Extract salt (16 bytes) and IV (16 bytes)
-                        salt = secret_payload[:16]
-                        iv = secret_payload[16:32]
-                        encrypted_data = secret_payload[32:]
+                        salt = payload_body[:16]
+                        iv = payload_body[16:32]
+                        encrypted_data = payload_body[32:]
                         
                         # Derive key from password
                         kdf = PBKDF2HMAC(
@@ -268,13 +282,10 @@ def extract_from_qr_stego(
                         secret_text = decrypted_padded[:-padding_length].decode('utf-8')
                         logger.info(f"Successfully decrypted secret: {len(secret_text)} characters")
                     else:
-                        # No password - check if data is encrypted
-                        if len(secret_payload) >= 32:
-                            # Data looks encrypted but no password provided
-                            logger.warning("Data appears encrypted but no password provided")
-                            raise ValueError("This QR code is password protected")
-                        # Data is plain text
-                        secret_text = secret_payload.decode('utf-8')
+                        # Flag is 0x00: plain text regardless of payload size
+                        if password:
+                            logger.warning("Password provided but payload is not encrypted; ignoring password")
+                        secret_text = payload_body.decode('utf-8')
                         logger.info(f"Decoded plain text secret: {len(secret_text)} characters")
                     
                 except base64.binascii.Error:
