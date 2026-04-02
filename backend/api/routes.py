@@ -7,6 +7,7 @@ import uuid
 from io import BytesIO
 import logging
 import hashlib
+import re
 import time
 
 from utils.steganography import hide_file_in_image, extract_file_from_image
@@ -351,8 +352,9 @@ def create_polyglot_file():
 def download_polyglot(download_id):
     """Download the polyglot file."""
     try:
-        # Validate filename to prevent path traversal
-        if '/' in download_id or '\\' in download_id:
+        # Validate filename: must be token_urlsafe(16) (22 chars) + dot + extension.
+        # This prevents path traversal and cross-user file enumeration (P2-07).
+        if not re.match(r'^[A-Za-z0-9_-]{22}\.[a-zA-Z0-9]+$', download_id):
             return jsonify({'error': 'Invalid download ID'}), 400
 
         file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], download_id)
