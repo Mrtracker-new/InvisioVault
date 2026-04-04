@@ -1,6 +1,7 @@
 """API routes for steganography operations."""
 from flask import Blueprint, request, jsonify, send_file, current_app
 from werkzeug.utils import secure_filename
+from PIL import Image
 import os
 import secrets
 import uuid
@@ -57,7 +58,7 @@ def sanitize_error(error_message: str, is_debug: bool = False) -> str:
     # Map specific errors to safe messages
     error_lower = error_message.lower()
     
-    if 'password' in error_lower or 'incorrect password' in error_lower:
+    if 'password' in error_lower:
         return SAFE_ERROR_MESSAGES['password']
     elif 'capacity' in error_lower or 'not enough' in error_lower:
         return SAFE_ERROR_MESSAGES['capacity']
@@ -69,9 +70,14 @@ def sanitize_error(error_message: str, is_debug: bool = False) -> str:
         return SAFE_ERROR_MESSAGES['generic']
 
 
-def get_limiter():
-    """Get the limiter instance from the current app."""
-    return current_app.limiter
+
+def _format_bytes(bytes_val: int) -> str:
+    """Format a byte count as a human-readable string (e.g. '1.4 MB')."""
+    if bytes_val < 1024:
+        return f"{bytes_val} Bytes"
+    if bytes_val < 1024 * 1024:
+        return f"{bytes_val / 1024:.1f} KB"
+    return f"{bytes_val / (1024 * 1024):.1f} MB"
 
 
 @api.route('/health', methods=['GET'])
@@ -103,28 +109,18 @@ def calculate_capacity():
         
         try:
             # Open image and calculate capacity
-            from PIL import Image
             img = Image.open(image_path).convert("RGB")
             total_pixels = len(list(img.getdata()))
-            
+
             # Capacity calculation: 3 bits per pixel (1 bit per RGB channel)
             # Divided by 8 to convert bits to bytes
             total_capacity_bytes = (total_pixels * 3) // 8
-            
-            # Format for display
-            def format_bytes(bytes_val):
-                if bytes_val < 1024:
-                    return f"{bytes_val} Bytes"
-                elif bytes_val < 1024 * 1024:
-                    return f"{bytes_val / 1024:.1f} KB"
-                else:
-                    return f"{bytes_val / (1024 * 1024):.1f} MB"
-            
+
             logger.info(f"Calculated capacity for image: {total_capacity_bytes} bytes")
-            
+
             return jsonify({
                 'totalCapacityBytes': total_capacity_bytes,
-                'totalCapacityFormatted': format_bytes(total_capacity_bytes)
+                'totalCapacityFormatted': _format_bytes(total_capacity_bytes)
             }), 200
             
         finally:
@@ -217,8 +213,9 @@ def hide_file():
 def download_image(download_id):
     """Download the image with hidden file."""
     try:
-        # Validate filename to prevent path traversal
-        if not download_id.endswith('.png') or '/' in download_id or '\\' in download_id:
+        # Strict allowlist: token_urlsafe(16) produces exactly 22 Base64url chars.
+        # Rejects URL-encoded traversal sequences, null bytes, OS separators, etc. (C-01)
+        if not re.match(r'^[A-Za-z0-9_-]{22}\.png$', download_id):
             return jsonify({'error': 'Invalid download ID'}), 400
 
         file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], download_id)
@@ -513,8 +510,9 @@ def generate_qr_code():
 def download_qr_code(download_id):
     """Download the generated QR code."""
     try:
-        # Validate filename to prevent path traversal
-        if not download_id.endswith('_qr.png') or '/' in download_id or '\\' in download_id:
+        # Strict allowlist: token_urlsafe(16) produces exactly 22 Base64url chars.
+        # Rejects URL-encoded traversal sequences, null bytes, OS separators, etc. (C-01)
+        if not re.match(r'^[A-Za-z0-9_-]{22}_qr\.png$', download_id):
             return jsonify({'error': 'Invalid download ID'}), 400
 
         file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], download_id)
@@ -562,23 +560,17 @@ def scan_qr_code():
         qr_image.save(qr_path)
         logger.debug(f'QR scan: Saved image to {qr_path}')
         
-        try:
-            # Extract both public and secret data
-            logger.info('QR scan: Extracting data from QR code...')
-            public_data, secret_data = extract_from_qr_stego(qr_path, password)
-            
-            logger.info(f'QR scan: Successfully extracted data. Public data length: {len(public_data)}, Secret data present: {bool(secret_data)}')
-            return jsonify({
-                'success': True,
-                'publicData': public_data,
-                'secretData': secret_data,
-                'hasPassword': password is not None
-            }), 200
-        finally:
-            # Clean up
-            if os.path.exists(qr_path):
-                os.remove(qr_path)
-                logger.debug('QR scan: Cleaned up temporary file')
+        # Extract both public and secret data
+        logger.info('QR scan: Extracting data from QR code...')
+        public_data, secret_data = extract_from_qr_stego(qr_path, password)
+
+        logger.info(f'QR scan: Successfully extracted data. Public data length: {len(public_data)}, Secret data present: {bool(secret_data)}')
+        return jsonify({
+            'success': True,
+            'publicData': public_data,
+            'secretData': secret_data,
+            'hasPassword': password is not None
+        }), 200
     
     except ValueError as e:
         logger.error(f'QR scan: Validation error - {str(e)}')
@@ -658,17 +650,9 @@ def qr_capacity():
 
         capacity = calculate_qr_capacity(public_data, scale)
 
-        def format_bytes(bytes_val):
-            if bytes_val < 1024:
-                return f"{bytes_val} Bytes"
-            elif bytes_val < 1024 * 1024:
-                return f"{bytes_val / 1024:.1f} KB"
-            else:
-                return f"{bytes_val / (1024 * 1024):.1f} MB"
-
         return jsonify({
             'totalCapacityBytes': capacity,
-            'totalCapacityFormatted': format_bytes(capacity)
+            'totalCapacityFormatted': _format_bytes(capacity)
         }), 200
 
     except Exception as e:
@@ -737,7 +721,6 @@ def detect_qr():
         
         # Try to decode QR code
         try:
-            from PIL import Image
             import zxingcpp
             
             # Open and decode the image
