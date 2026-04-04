@@ -4,7 +4,7 @@ from PIL import Image
 import io
 import os
 from typing import Optional, Tuple
-import zxingcpp
+from pyzbar.pyzbar import decode as _pyzbar_decode
 import tempfile
 
 from utils.steganography import hide_file_in_image, extract_file_from_image
@@ -217,13 +217,13 @@ def extract_from_qr_stego(
         
         # Decode QR code data
         logger.info(f"Extracting from QR code: {qr_path}")
-        decoded_objects = zxingcpp.read_barcodes(Image.open(qr_path))
-        
+        decoded_objects = _pyzbar_decode(Image.open(qr_path))
+
         if not decoded_objects:
             raise ValueError("No QR code found in the image")
-        
-        # Get the full QR data
-        qr_data = decoded_objects[0].text
+
+        # Get the full QR data (pyzbar returns bytes via .data)
+        qr_data = decoded_objects[0].data.decode("utf-8")
         logger.info(f"Full QR data: {qr_data[:100]}...")
         
         # Check for fragment-based format (#IVDATA:)
@@ -340,9 +340,9 @@ def calculate_qr_capacity(
         try:
             qr.save(temp_path, scale=scale, border=2)
             
-            # Open image and calculate capacity
+            # Open image and calculate capacity (no pixel-list allocation)
             img = Image.open(temp_path).convert('RGB')
-            total_pixels = len(list(img.getdata()))
+            total_pixels = img.width * img.height
             
             # Capacity: 3 bits per pixel (1 per RGB channel) / 8 = bytes
             # Subtract overhead for metadata (~100 bytes)
@@ -372,12 +372,13 @@ def decode_qr_only(qr_path: str) -> str:
         ValueError: If no QR code is found
     """
     try:
-        decoded_objects = zxingcpp.read_barcodes(Image.open(qr_path))
-        
+        decoded_objects = _pyzbar_decode(Image.open(qr_path))
+
         if not decoded_objects:
             raise ValueError("No QR code found in the image")
-        
-        return decoded_objects[0].text
+
+        # pyzbar returns bytes; decode to string
+        return decoded_objects[0].data.decode("utf-8")
     
     except ValueError:
         raise
