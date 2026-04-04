@@ -108,9 +108,11 @@ def calculate_capacity():
         image.save(image_path)
         
         try:
-            # Open image and calculate capacity
+            # Open image and calculate capacity.
+            # Use img.width * img.height instead of len(list(img.getdata()))
+            # to avoid materialising the entire pixel list just for a count.
             img = Image.open(image_path).convert("RGB")
-            total_pixels = len(list(img.getdata()))
+            total_pixels = img.width * img.height
 
             # Capacity calculation: 3 bits per pixel (1 bit per RGB channel)
             # Divided by 8 to convert bits to bytes
