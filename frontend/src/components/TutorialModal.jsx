@@ -4,6 +4,7 @@ import './TutorialModal.css'
 const TABS = [
   { id: 'stego', label: 'Steganography', icon: '🖼️' },
   { id: 'polyglot', label: 'Polyglot', icon: '🔗' },
+  { id: 'qr', label: 'QR Stego', icon: '📱' },
   { id: 'security', label: 'Security', icon: '🔒' },
 ]
 
@@ -25,6 +26,21 @@ const POLYGLOT_STEPS = [
   { num: 2, title: 'Choose Secret File', desc: 'Pick the file you want embedded and hidden within the cover.' },
   { num: 3, title: 'Add Encryption', desc: 'Optionally enter a password to encrypt the embedded payload.' },
   { num: 4, title: 'Create & Download', desc: 'Click "Create Polyglot" to merge both files. The result acts as a normal cover file but holds your secret.' },
+]
+
+const QR_GENERATE_STEPS = [
+  { num: 1, title: 'Enter Public Data', desc: 'Type a URL or any text that will be visible when anyone scans the QR code with a normal scanner.' },
+  { num: 2, title: 'Add a Secret Message', desc: 'Type the hidden text to embed — passwords, keys, private notes, anything. Only InvisioVault can reveal it.' },
+  { num: 3, title: 'Customise (Optional)', desc: 'Pick foreground/background colours, adjust the size slider, and optionally overlay a logo in the centre.' },
+  { num: 4, title: 'Encrypt with Password', desc: 'Optionally add a password to encrypt the secret payload. Minimum 8 characters required.' },
+  { num: 5, title: 'Generate & Download', desc: 'Click "Generate QR Code". The output is a fully valid, scannable QR code with your secret concealed inside.' },
+]
+
+const QR_EXTRACT_STEPS = [
+  { num: 1, title: 'Choose Scan Mode', desc: 'Use "Camera Scan" to point your device at a QR code in real time, or "Upload Image" to load a saved file.' },
+  { num: 2, title: 'Enter Password', desc: 'If the QR was created with a password, enter it before scanning so the hidden data can be decrypted.' },
+  { num: 3, title: 'Scan or Upload', desc: 'Point the camera — a green bounding box confirms detection — or pick the file and click "Scan & Extract".' },
+  { num: 4, title: 'Read Both Layers', desc: 'You will see the public data (what the QR normally contains) and the hidden secret message displayed side by side.' },
 ]
 
 const SECURITY_TIPS = [
@@ -158,6 +174,45 @@ function TutorialModal({ isOpen, onClose }) {
                 </h3>
                 <div className="tm-steps">
                   {STEGO_EXTRACT_STEPS.map((s) => (
+                    <StepCard key={s.num} {...s} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── QR Code Stego ── */}
+          {activeTab === 'qr' && (
+            <div
+              id="tm-panel-qr"
+              role="tabpanel"
+              aria-labelledby="tm-tab-qr"
+              className="tm-section"
+            >
+              <div className="tm-subsection">
+                <h3 className="tm-section-heading">
+                  <span className="tm-section-badge">Generate</span>
+                  Creating a Stego QR Code
+                </h3>
+                <p className="tm-section-intro">
+                  InvisioVault QR codes look and scan like any standard QR code. A normal scanner reveals only the public data. InvisioVault's scanner additionally reveals the secret message hidden inside.
+                </p>
+                <div className="tm-steps">
+                  {QR_GENERATE_STEPS.map((s) => (
+                    <StepCard key={s.num} {...s} />
+                  ))}
+                </div>
+              </div>
+
+              <div className="tm-divider" aria-hidden="true" />
+
+              <div className="tm-subsection">
+                <h3 className="tm-section-heading">
+                  <span className="tm-section-badge tm-section-badge--extract">Reveal</span>
+                  Extracting the Hidden Message
+                </h3>
+                <div className="tm-steps">
+                  {QR_EXTRACT_STEPS.map((s) => (
                     <StepCard key={s.num} {...s} />
                   ))}
                 </div>
