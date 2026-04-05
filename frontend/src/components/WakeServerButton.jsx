@@ -155,24 +155,24 @@ function WakeServerButton() {
         {/* Background Glow Layer */}
         <span className="glow-layer" aria-hidden="true"></span>
 
-        {/* Loading Spinner (visible only during waking) */}
+        {/* Loading Spinner — visible only during waking.
+             viewBox 36×36, r=17 → circumference ≈ 106.8.
+             stroke-dasharray is handled purely in CSS. */}
         {status === 'waking' && (
-          <svg className="spinner-ring" viewBox="0 0 50 50" aria-hidden="true">
+          <svg className="spinner-ring" viewBox="0 0 36 36" aria-hidden="true">
             <circle
               className="spinner-track"
-              cx="25"
-              cy="25"
-              r="20"
+              cx="18"
+              cy="18"
+              r="15"
               fill="none"
-              strokeWidth="3"
             />
             <circle
               className="spinner-arc"
-              cx="25"
-              cy="25"
-              r="20"
+              cx="18"
+              cy="18"
+              r="15"
               fill="none"
-              strokeWidth="3"
             />
           </svg>
         )}
@@ -200,7 +200,7 @@ function WakeServerButton() {
             aria-hidden="true"
             fill="none"
             stroke="currentColor"
-            strokeWidth="3"
+            strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           >
