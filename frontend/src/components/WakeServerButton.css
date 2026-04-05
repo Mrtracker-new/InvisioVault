@@ -1,6 +1,8 @@
-/* ============================================================================ */
-/*                         POWER-ON BUTTON STYLES                             */
-/* ============================================================================ */
+/* ============================================================================
+   WAKE SERVER BUTTON — Production CSS
+   Fixes: glow-layer always hidden, broken spinner circumference/transform-origin,
+          missing breathing pulse, non-responsive spinner & toast, dead animations.
+   ============================================================================ */
 
 /* --- Container --- */
 .wake-server-container {
@@ -13,321 +15,320 @@
 
 /* --- CSS Custom Properties --- */
 :root {
-  --power-btn-size-mobile: 48px;
-  --power-btn-size-desktop: 52px;
+  --power-btn-h-mobile: 44px;
+  --power-btn-h-desktop: 48px;
 
-  /* Glow colors for each state */
-  --glow-idle: rgba(59, 130, 246, 0.4);
-  --glow-loading: rgba(251, 191, 36, 0.5);
-  --glow-success: rgba(74, 222, 128, 0.6);
-  --glow-error: rgba(239, 68, 68, 0.5);
+  /* State colors */
+  --color-idle:    rgba(148, 163, 184, 0.85);
+  --color-waking:  rgb(251, 191, 36);
+  --color-online:  rgb(74, 222, 128);
+  --color-error:   rgb(239, 68, 68);
+  --color-cooldown: rgba(148, 163, 184, 0.45);
 
-  /* Animation durations */
-  --power-transition: 300ms cubic-bezier(0.4, 0, 0.2, 1);
-  --power-bounce: 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Glow spread colors */
+  --glow-idle:    rgba(148, 163, 184, 0.18);
+  --glow-waking:  rgba(251, 191, 36, 0.30);
+  --glow-online:  rgba(74,  222, 128, 0.40);
+  --glow-error:   rgba(239,  68,  68, 0.35);
+
+  /* Transitions */
+  --power-ease:   cubic-bezier(0.4, 0, 0.2, 1);
+  --power-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --power-tx: 280ms var(--power-ease);
 }
 
-/* ============================================================================ */
-/*                            BASE BUTTON DESIGN                              */
-/* ============================================================================ */
+/* ============================================================================
+   BASE BUTTON
+   ============================================================================ */
 
 .power-button {
   /* Layout */
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
 
-  /* Size - Mobile First (Icon Only) */
-  width: var(--power-btn-size-mobile);
-  height: var(--power-btn-size-mobile);
-  min-width: var(--power-btn-size-mobile);
+  /* Mobile: icon-only pill */
+  width: var(--power-btn-h-mobile);
+  height: var(--power-btn-h-mobile);
+  min-width: var(--power-btn-h-mobile);
   padding: 0;
 
-  /* Visual Design */
-  background: rgba(15, 23, 42, 0.6);
-  border: 2px solid rgba(148, 163, 184, 0.2);
-  border-radius: 50%;
+  /* Visuals */
+  background: rgba(15, 23, 42, 0.65);
+  border: 1.5px solid rgba(148, 163, 184, 0.18);
+  border-radius: 9999px;
+  color: var(--color-idle);
 
   /* Typography */
-  color: rgba(148, 163, 184, 0.9);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12.5px;
   font-weight: 600;
-  font-size: 13px;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
 
-  /* Effects */
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* Glass effect */
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   /* Interaction */
   cursor: pointer;
-  overflow: visible;
-  transition: all var(--power-transition);
+  user-select: none;
+  -webkit-user-select: none;
 
-  /* Ensure proper stacking */
+  /* Stacking & overflow */
   isolation: isolate;
+  overflow: hidden;         /* clip inner glow to rounded corners */
+
+  transition:
+    background var(--power-tx),
+    border-color var(--power-tx),
+    color var(--power-tx),
+    box-shadow var(--power-tx),
+    transform 200ms var(--power-ease);
 }
 
-/* ============================================================================ */
-/*                         INTERACTIVE STATES                                 */
-/* ============================================================================ */
+/* ============================================================================
+   INTERACTIVE STATES
+   ============================================================================ */
 
-/* --- Hover (Desktop Only) --- */
+/* Hover — desktop pointer only */
 @media (hover: hover) and (pointer: fine) {
   .power-button:hover:not(:disabled) {
-    background: rgba(15, 23, 42, 0.8);
-    border-color: rgba(148, 163, 184, 0.4);
+    background: rgba(20, 30, 55, 0.85);
+    border-color: rgba(148, 163, 184, 0.38);
     color: rgba(226, 232, 240, 1);
-    transform: translateY(-2px) scale(1.02);
+    transform: translateY(-2px) scale(1.03);
     box-shadow:
-      0 8px 24px rgba(0, 0, 0, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      0 8px 22px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.07);
   }
 }
 
-/* --- Active/Click --- */
+/* Press */
 .power-button:active:not(:disabled) {
-  transform: translateY(0) scale(0.95);
-  transition: all 100ms ease-out;
+  transform: scale(0.94);
+  transition: transform 90ms ease-out;
 }
 
-/* --- Focus (Keyboard Navigation) --- */
+/* Focus ring */
 .power-button:focus-visible {
   outline: none;
-  border-color: rgba(59, 130, 246, 0.8);
   box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.3),
-    0 0 0 2px rgba(59, 130, 246, 0.5);
+    0 0 0 3px rgba(59, 130, 246, 0.55),
+    0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
-/* --- Disabled State --- */
+/* Disabled */
 .power-button:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
-  transform: none;
+  transform: none !important;
+  opacity: 0.55;
 }
 
-/* ============================================================================ */
-/*                          STATE-SPECIFIC STYLES                             */
-/* ============================================================================ */
+/* ============================================================================
+   STATE — IDLE
+   Subtle breathing glow to show the button is alive.
+   ============================================================================ */
 
-/* --- IDLE: Subtle Breathing Pulse --- */
+.power-button.idle {
+  border-color: rgba(148, 163, 184, 0.18);
+  color: var(--color-idle);
+}
+
 .power-button.idle .glow-layer {
-  /* Breathing pulse disabled - no blue glow in idle state */
-  opacity: 0;
+  background: radial-gradient(circle at 50% 50%, var(--glow-idle) 0%, transparent 72%);
+  animation: breathing-pulse 3.5s ease-in-out infinite;
 }
 
 @keyframes breathing-pulse {
-
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 0.6;
-    transform: scale(1.1);
-  }
+  0%, 100% { opacity: 0.30; transform: translate(-50%, -50%) scale(1.0); }
+  50%       { opacity: 0.70; transform: translate(-50%, -50%) scale(1.15); }
 }
 
-/* --- WAKING: Loading State --- */
+/* ============================================================================
+   STATE — WAKING (loading)
+   ============================================================================ */
+
 .power-button.waking {
-  border-color: rgba(251, 191, 36, 0.5);
-  color: rgb(251, 191, 36);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border-color: rgba(251, 191, 36, 0.50);
+  color: var(--color-waking);
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    0 0 18px rgba(251, 191, 36, 0.12);
 }
 
 .power-button.waking .glow-layer {
-  opacity: 0;
+  background: radial-gradient(circle at 50% 50%, var(--glow-waking) 0%, transparent 70%);
+  animation: waking-throb 1.4s ease-in-out infinite;
 }
 
-@keyframes pulse-glow {
-
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-
-  50% {
-    opacity: 0.8;
-  }
+@keyframes waking-throb {
+  0%, 100% { opacity: 0.45; transform: translate(-50%, -50%) scale(1.0); }
+  50%       { opacity: 0.90; transform: translate(-50%, -50%) scale(1.25); }
 }
 
-/* --- ONLINE: Success State --- */
+/* Icon pulse during waking */
+.power-button.waking .power-icon {
+  animation: icon-pulse 1.4s ease-in-out infinite;
+  will-change: opacity;
+}
+
+@keyframes icon-pulse {
+  0%, 100% { opacity: 1;   }
+  50%       { opacity: 0.5; }
+}
+
+/* ============================================================================
+   STATE — ONLINE (success)
+   ============================================================================ */
+
 .power-button.online {
-  border-color: rgba(74, 222, 128, 0.6);
-  background: rgba(74, 222, 128, 0.1);
-  color: rgb(74, 222, 128);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  animation: success-bloom 600ms var(--power-bounce);
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(74, 222, 128, 0.08);
+  color: var(--color-online);
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.3),
+    0 0 20px rgba(74, 222, 128, 0.15);
+  animation: success-bloom 550ms var(--power-bounce) forwards;
+  will-change: transform;
 }
 
 @keyframes success-bloom {
-  0% {
-    transform: scale(1);
-  }
-
-  50% {
-    transform: scale(1.15);
-  }
-
-  100% {
-    transform: scale(1);
-  }
+  0%   { transform: scale(1);    }
+  55%  { transform: scale(1.12); }
+  100% { transform: scale(1);    }
 }
 
 .power-button.online .glow-layer {
-  opacity: 0;
+  background: radial-gradient(circle at 50% 50%, var(--glow-online) 0%, transparent 65%);
+  animation: online-glow 2.5s ease-in-out infinite;
 }
 
-@keyframes bloom-pulse {
-  0% {
-    opacity: 0;
-    transform: scale(0.8);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.3);
-  }
-
-  100% {
-    opacity: 0.8;
-    transform: scale(1);
-  }
+@keyframes online-glow {
+  0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.0);  }
+  50%       { opacity: 1.00; transform: translate(-50%, -50%) scale(1.20); }
 }
 
-/* --- ERROR: Shake Animation --- */
+/* ============================================================================
+   STATE — ERROR
+   ============================================================================ */
+
 .power-button.error {
-  border-color: rgba(239, 68, 68, 0.6);
-  color: rgb(239, 68, 68);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  animation: shake 600ms ease-in-out;
+  border-color: rgba(239, 68, 68, 0.55);
+  color: var(--color-error);
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.3),
+    0 0 16px rgba(239, 68, 68, 0.15);
+  animation: shake 550ms cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards;
+  will-change: transform;
 }
 
 @keyframes shake {
-
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-
-  10%,
-  30%,
-  50%,
-  70%,
-  90% {
-    transform: translateX(-6px);
-  }
-
-  20%,
-  40%,
-  60%,
-  80% {
-    transform: translateX(6px);
-  }
+  0%,  100% { transform: translateX(0);   }
+  15%, 45%, 75% { transform: translateX(-6px); }
+  30%, 60%, 90% { transform: translateX(6px);  }
 }
 
 .power-button.error .glow-layer {
+  background: radial-gradient(circle at 50% 50%, var(--glow-error) 0%, transparent 70%);
+  opacity: 0.6;
+}
+
+/* ============================================================================
+   STATE — COOLDOWN
+   ============================================================================ */
+
+.power-button.cooldown {
+  border-color: rgba(148, 163, 184, 0.12);
+  color: var(--color-cooldown);
+  background: rgba(15, 23, 42, 0.40);
+}
+
+.power-button.cooldown .glow-layer {
   opacity: 0;
 }
 
-/* --- COOLDOWN: Muted State --- */
-.power-button.cooldown {
-  border-color: rgba(148, 163, 184, 0.2);
-  color: rgba(148, 163, 184, 0.5);
-  background: rgba(15, 23, 42, 0.4);
-}
-
-/* ============================================================================ */
-/*                           INTERNAL ELEMENTS                                */
-/* ============================================================================ */
+/* ============================================================================
+   INTERNAL ELEMENTS
+   ============================================================================ */
 
 /* --- Glow Background Layer --- */
 .glow-layer {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 100%;
-  height: 100%;
+  /* Slightly oversized so it bleeds past the border into a soft halo */
+  width: 160%;
+  height: 160%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: radial-gradient(circle, var(--glow-idle) 0%, transparent 70%);
-  opacity: 0;
   pointer-events: none;
-  z-index: -1;
-  transition: all var(--power-transition);
+  z-index: 0;
+  opacity: 0;
+  will-change: opacity, transform;
+  /* No default transition — each state controls its own animation */
 }
 
 /* --- Power Icon --- */
 .power-icon {
-  width: 24px;
-  height: 24px;
-  stroke: currentColor;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  fill: none;
-  transition: all var(--power-transition);
+  position: relative;
   z-index: 2;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+  transition: opacity var(--power-tx);
+  /* Subtle drop shadow matches current state color via currentColor */
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
 }
 
-/* Icon animation on state change */
-.power-button.waking .power-icon {
-  animation: icon-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes icon-pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.6;
-  }
-}
-
-/* --- Loading Spinner --- */
+/* --- Loading Spinner ---
+   Circle circumference at r=18: 2π×18 ≈ 113.1
+   Arc length ~35% of circle = ~40px       */
 .spinner-ring {
   position: absolute;
+  /* Center exactly on button */
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 36px;
-  height: 36px;
+  /* Scale with button height, leave 10px margin on each side */
+  width: calc(var(--power-btn-h-mobile) - 12px);
+  height: calc(var(--power-btn-h-mobile) - 12px);
   z-index: 1;
   pointer-events: none;
+  overflow: visible;
 }
 
 .spinner-track {
-  stroke: rgba(251, 191, 36, 0.2);
-  stroke-width: 3;
+  stroke: rgba(251, 191, 36, 0.18);
+  stroke-width: 2.5;
+  fill: none;
 }
 
 .spinner-arc {
   stroke: rgb(251, 191, 36);
-  stroke-width: 3;
+  stroke-width: 2.5;
   stroke-linecap: round;
-  stroke-dasharray: 80;
-  stroke-dashoffset: 60;
-  transform-origin: center;
-  animation: spinner-rotate 1.2s linear infinite;
-  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
+  fill: none;
+  /* r=15 → circumference ≈ 94.2; arc ≈ 37% ≈ 35px, gap ≈ 59px */
+  stroke-dasharray: 35 59;
+  stroke-dashoffset: 0;
+  /* Rotate around the SVG's own center */
+  transform-origin: 50% 50%;
+  animation: spinner-rotate 1s linear infinite;
+  filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.65));
+  will-change: transform;
 }
 
 @keyframes spinner-rotate {
-  100% {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg);   }
+  to   { transform: rotate(360deg); }
 }
 
 /* --- Success Checkmark --- */
@@ -336,198 +337,229 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 28px;
-  height: 28px;
-  stroke: rgb(74, 222, 128);
-  stroke-width: 3;
+  width: 22px;
+  height: 22px;
+  stroke: var(--color-online);
+  stroke-width: 2.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   fill: none;
   z-index: 3;
-  filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.8));
-  animation: checkmark-appear 600ms var(--power-bounce);
+  pointer-events: none;
+  filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.8));
+  animation: checkmark-pop 500ms var(--power-bounce) forwards;
+  will-change: transform, opacity;
 }
 
-@keyframes checkmark-appear {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0);
-  }
-
-  50% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.2);
-  }
-
-  100% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
+@keyframes checkmark-pop {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  60%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1);    }
 }
 
-/* Draw animation for checkmark path */
+/* Draw the checkmark path */
 .success-checkmark polyline {
-  stroke-dasharray: 30;
-  stroke-dashoffset: 30;
-  animation: checkmark-draw 400ms ease-out 200ms forwards;
+  /* polyline points="20 6 9 17 4 12" → path length ≈ 22px */
+  stroke-dasharray: 22;
+  stroke-dashoffset: 22;
+  animation: checkmark-draw 380ms ease-out 160ms forwards;
+  will-change: stroke-dashoffset;
 }
 
 @keyframes checkmark-draw {
-  to {
-    stroke-dashoffset: 0;
-  }
+  to { stroke-dashoffset: 0; }
 }
 
-/* --- Status Label (Hidden on Mobile) --- */
+/* --- Status Label --- */
 .status-label {
   display: none;
-  white-space: nowrap;
-  font-weight: 600;
+  position: relative;
   z-index: 2;
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  animation: label-slide-in 250ms var(--power-ease) forwards;
 }
 
-/* ============================================================================ */
-/*                           TOAST NOTIFICATION                               */
-/* ============================================================================ */
+@keyframes label-slide-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+
+/* ============================================================================
+   TOAST NOTIFICATION
+   ============================================================================ */
 
 .status-toast {
   position: absolute;
-  top: calc(100% + 12px);
+  /* Below button with a gap */
+  top: calc(100% + 10px);
   right: 0;
-  min-width: 200px;
-  max-width: 280px;
 
-  padding: 10px 14px;
-  background: rgba(15, 23, 42, 0.95);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 12px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  min-width: 185px;
+  max-width: 270px;
+
+  padding: 9px 13px;
+  background: rgba(10, 14, 28, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 11px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 10px 28px rgba(0, 0, 0, 0.50),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
 
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
   color: rgba(226, 232, 240, 0.9);
-  line-height: 1.4;
+  line-height: 1.45;
 
   pointer-events: none;
+
+  /* Hidden state */
   opacity: 0;
-  transform: translateY(-8px);
-  transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateY(-6px) scale(0.97);
+  transition:
+    opacity 260ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 100;
+
+  /* Prevent overflow on very small screens */
+  right: 0;
+  left: auto;
+}
+
+/* On mobile ensure toast does not overflow the viewport */
+@media (max-width: 380px) {
+  .status-toast {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%) translateY(-6px) scale(0.97);
+    min-width: 160px;
+  }
+
+  .status-toast.visible {
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
 }
 
 .status-toast.visible {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 
+/* Toast indicator dot */
 .status-toast .toast-dot {
-  width: 8px;
-  height: 8px;
-  min-width: 8px;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: rgba(148, 163, 184, 0.6);
-  box-shadow: 0 0 8px currentColor;
+  background: rgba(148, 163, 184, 0.55);
 }
 
-/* Toast Variants */
+/* Loading — animated amber dot */
 .status-toast.loading .toast-dot {
-  background: rgb(251, 191, 36);
-  animation: dot-pulse 1.5s ease-in-out infinite;
+  background: var(--color-waking);
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
+  animation: dot-breathe 1.2s ease-in-out infinite;
+  will-change: opacity, transform;
 }
 
-@keyframes dot-pulse {
-
-  0%,
-  100% {
-    opacity: 0.6;
-  }
-
-  50% {
-    opacity: 1;
-  }
+@keyframes dot-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1);    }
+  50%       { opacity: 1;    transform: scale(1.35); }
 }
 
+/* Success */
 .status-toast.success .toast-dot {
-  background: rgb(74, 222, 128);
+  background: var(--color-online);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.55);
 }
 
+/* Error */
 .status-toast.error .toast-dot {
-  background: rgb(239, 68, 68);
+  background: var(--color-error);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.55);
 }
 
-/* ============================================================================ */
-/*                          RESPONSIVE DESIGN                                 */
-/* ============================================================================ */
+/* Info */
+.status-toast.info .toast-dot {
+  background: rgba(148, 163, 184, 0.7);
+}
 
-/* Tablet & Desktop: Show Text Label */
+/* ============================================================================
+   RESPONSIVE — Tablet & Desktop (768px+): pill with text label
+   ============================================================================ */
+
 @media (min-width: 768px) {
   .power-button {
     width: auto;
-    min-width: var(--power-btn-size-desktop);
-    height: var(--power-btn-size-desktop);
-    padding: 0 20px;
-    border-radius: 26px;
+    height: var(--power-btn-h-desktop);
+    min-width: var(--power-btn-h-desktop);
+    padding: 0 18px;
   }
 
   .power-icon {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
+  }
+
+  .spinner-ring {
+    width: calc(var(--power-btn-h-desktop) - 12px);
+    height: calc(var(--power-btn-h-desktop) - 12px);
   }
 
   .status-label {
     display: block;
-    animation: label-fade-in 300ms ease-out;
   }
 
-  @keyframes label-fade-in {
-    from {
-      opacity: 0;
-      transform: translateX(-4px);
-    }
-
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
+  .success-checkmark {
+    width: 20px;
+    height: 20px;
   }
 }
 
-/* Large Desktop: Slightly larger design */
-@media (min-width: 1440px) {
+/* ============================================================================
+   RESPONSIVE — Large Desktop (1280px+): slightly enlarged
+   ============================================================================ */
+
+@media (min-width: 1280px) {
+  :root {
+    --power-btn-h-desktop: 52px;
+  }
+
   .power-button {
-    min-width: 56px;
-    height: 56px;
-    padding: 0 24px;
-    font-size: 14px;
+    padding: 0 22px;
+    font-size: 13px;
   }
 
   .power-icon {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
   }
 }
 
-/* ============================================================================ */
-/*                          ACCESSIBILITY                                     */
-/* ============================================================================ */
+/* ============================================================================
+   ACCESSIBILITY
+   ============================================================================ */
 
-/* Reduced Motion Support */
+/* Reduced motion — rely solely on color/opacity, no movement */
 @media (prefers-reduced-motion: reduce) {
-
   .power-button,
   .power-button *,
   .glow-layer,
-  .status-toast {
-    animation: none !important;
-    transition: opacity 200ms ease, color 200ms ease !important;
+  .spinner-arc,
+  .status-toast,
+  .success-checkmark {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 200ms !important;
   }
 
   .power-button:active:not(:disabled) {
@@ -535,30 +567,29 @@
   }
 }
 
-/* High Contrast Mode */
+/* High contrast */
 @media (prefers-contrast: high) {
   .power-button {
-    border-width: 3px;
+    border-width: 2px;
     border-color: currentColor;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   .power-button:focus-visible {
     outline: 3px solid currentColor;
-    outline-offset: 2px;
+    outline-offset: 3px;
   }
 }
 
-/* Touch Device Optimization */
+/* Touch devices — ensure minimum tap target */
 @media (hover: none) and (pointer: coarse) {
   .power-button {
-    /* Ensure minimum touch target size */
     min-width: 48px;
     min-height: 48px;
   }
 
-  /* Provide visual feedback for touch */
   .power-button:active:not(:disabled) {
-    background: rgba(15, 23, 42, 0.9);
-    transform: scale(0.95);
+    background: rgba(20, 30, 55, 0.9);
   }
 }
