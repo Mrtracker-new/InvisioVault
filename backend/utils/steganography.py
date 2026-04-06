@@ -27,10 +27,9 @@ import mimetypes
 import os
 import secrets
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.backends import default_backend
 import base64
+
+from utils.crypto_utils import derive_fernet_key
 import itertools
 
 
@@ -51,25 +50,10 @@ _MAX_METADATA_ENC_LEN: int = 1024
 _MAX_PAYLOAD_BYTES: int = 10 * 1024 * 1024 * 10  # 100 MB
 
 
-def _derive_key_from_password(password: str, salt: bytes) -> bytes:
-    """Derive a Fernet key from a password using PBKDF2 with salt.
-
-    Args:
-        password: User password
-        salt: 16-byte salt for key derivation
-
-    Returns:
-        32-byte Fernet key (base64url-encoded, ready for Fernet())
-    """
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=480000,  # OWASP recommended minimum for 2023+
-        backend=default_backend(),
-    )
-    key = kdf.derive(password.encode())
-    return base64.urlsafe_b64encode(key)
+# Key derivation is provided by the shared crypto_utils module.
+# ``derive_fernet_key(password, salt)`` is a drop-in replacement for the old
+# ``_derive_key_from_password`` — same algorithm, same output format.
+_derive_key_from_password = derive_fernet_key  # backwards-compat alias
 
 
 # ── Streaming LSB primitives ───────────────────────────────────────────────────
