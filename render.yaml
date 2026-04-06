@@ -6,8 +6,11 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    # Use 1 worker for free tier stability (less memory, faster startup)
-    startCommand: gunicorn app:app --workers 1 --timeout 120 --bind 0.0.0.0:$PORT --log-level info
+    # 1 worker + 2 threads: free tier has ~512 MB RAM; one sync worker avoids
+    # OOM. Two threads within the worker handle overlapping I/O without blocking
+    # the health check. --preload loads the app once before forking — faster
+    # startup means Render's first health probe is answered before the timeout.
+    startCommand: gunicorn app:app --workers 1 --threads 2 --timeout 120 --graceful-timeout 30 --bind 0.0.0.0:$PORT --preload --log-level info
     envVars:
       - key: FLASK_ENV
         value: production
