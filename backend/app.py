@@ -123,14 +123,37 @@ def create_app(config_name='default'):
     from api.routes import detect_qr  # import the view function by name
     limiter.limit("60 per minute")(detect_qr)
 
+    # Exempt the health check and root from rate limiting entirely.
+    # Render probes /api/health every ~10 seconds — if it ever gets a 429 the
+    # instance is marked unhealthy and a restart/redeploy cascade begins.
+    # The root index is similarly low-cost and should always respond 200.
+    from api.routes import health_check  # import the view function by name
+    limiter.exempt(health_check)
+
+    @app.route('/')
+    @limiter.exempt
+    def _root_exempt():
+        """Root probe — exempt from rate limiting so it always responds 200."""
+        return {
+            'name': 'InvisioVault API',
+            'status': 'running',
+            'version': '2.0.1'
+        }
+
+    app.logger.info("Rate-limit exemptions applied: /api/health, /")
+
     # Return clean JSON on rate-limit breach so clients (including the camera
     # scanner) can handle 429s gracefully instead of receiving an HTML error page.
     @app.errorhandler(429)
     def rate_limit_exceeded(e):
-        return {
+        from flask import make_response, jsonify
+        resp = make_response(jsonify({
             'error': 'Too many requests. Please slow down.',
-            'retry_after': e.description
-        }, 429
+            'retry_after': getattr(e, 'description', 'unknown')
+        }), 429)
+        # Standard header so HTTP clients know when to retry
+        resp.headers['Retry-After'] = '60'
+        return resp
 
     # Create upload folder
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -144,13 +167,8 @@ def create_app(config_name='default'):
     # Ensure cleanup stops when app shuts down
     atexit.register(stop_cleanup_scheduler)
     
-    @app.route('/')
-    def index():
-        return {
-            'name': 'InvisioVault API',
-            'status': 'running',
-            'version': '2.0.1'
-        }
+    # NOTE: The root route is registered above (exempt from rate limiting).
+    # Keeping this comment so the logical flow is easy to follow.
     
     return app
 
