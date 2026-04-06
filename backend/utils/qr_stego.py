@@ -1,15 +1,196 @@
-"""QR Code steganography utilities for generating customized QR codes with hidden data."""
-import segno
-from PIL import Image
-import io
+"""QR Code steganography utilities for generating customised QR codes with
+hidden data.
+
+Encryption scheme (M-02 fix)
+-----------------------------
+Previously the optional password path used raw AES-256-CBC, which provides
+*confidentiality* but **no authenticity**.  An observer who can see the
+ciphertext can:
+
+  * Execute a padding-oracle attack if error responses differ.
+  * Perform targeted bit-flip attacks (CBC malleability) to corrupt or
+    selectively modify plaintext bytes in a predictable way.
+
+The fix replaces that path with **Fernet** (AES-128-CBC + HMAC-SHA256 under
+the hood), which is the same primitive already used by steganography.py.
+Fernet is a high-level, misuse-resistant AEAD construction: the ciphertext
+is rejected in constant time if the HMAC tag does not verify, eliminating
+both the padding-oracle and the bit-flip vectors.
+
+Wire format (QR fragment payload)
+----------------------------------
+The base64-encoded IVDATA fragment payload is always:
+
+    Without password:
+        [0x00] + UTF-8 secret bytes
+
+    With password (current, v2):
+        [0x02] + salt(16 bytes) + fernet_token(variable)
+
+    Legacy / rejected (v1 — old AES-CBC):
+        [0x01] + ...  →  ValueError on read with actionable message
+
+Flag bytes are defined in utils.crypto_utils and documented there.
+"""
+
+from __future__ import annotations
+
+import base64
+import logging
 import os
-import numpy as np
-import zxingcpp
-from typing import Optional, Tuple
+import secrets
 import tempfile
+from typing import Optional, Tuple
 
-from utils.steganography import hide_file_in_image, extract_file_from_image
+import numpy as np
+import segno
+import zxingcpp
+from PIL import Image
 
+from cryptography.fernet import Fernet, InvalidToken
+
+from utils.crypto_utils import (
+    FLAG_FERNET,
+    FLAG_LEGACY_CBC,
+    FLAG_PLAIN,
+    SALT_LENGTH,
+    derive_fernet_key,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _encrypt_secret(secret_text: str, password: str) -> bytes:
+    """Encrypt *secret_text* with *password* using Fernet.
+
+    Wire format of returned bytes:
+        [0x02 (1)] + [salt (16)] + [fernet_token (variable)]
+
+    Args:
+        secret_text: Plaintext secret to encrypt.
+        password:    User-supplied password.
+
+    Returns:
+        Raw payload bytes (not base64-encoded).
+    """
+    salt = secrets.token_bytes(SALT_LENGTH)
+    key = derive_fernet_key(password, salt)
+    fernet = Fernet(key)
+    token = fernet.encrypt(secret_text.encode("utf-8"))
+    return bytes([FLAG_FERNET]) + salt + token
+
+
+def _decrypt_secret(payload_body: bytes, password: str) -> str:
+    """Decrypt a Fernet-encrypted payload body (after the flag byte).
+
+    Args:
+        payload_body: Raw bytes after the 0x02 flag byte.
+                      Expected: salt(16) + fernet_token.
+        password:     User-supplied password.
+
+    Returns:
+        Decrypted plaintext string.
+
+    Raises:
+        ValueError: On tampered ciphertext, wrong password, or malformed data.
+    """
+    if len(payload_body) < SALT_LENGTH + 1:
+        raise ValueError(
+            "Encrypted payload is too short to be valid "
+            f"(expected > {SALT_LENGTH} bytes, got {len(payload_body)})."
+        )
+
+    salt = payload_body[:SALT_LENGTH]
+    token = payload_body[SALT_LENGTH:]
+
+    key = derive_fernet_key(password, salt)
+    fernet = Fernet(key)
+
+    try:
+        plaintext = fernet.decrypt(token)
+    except InvalidToken:
+        # InvalidToken is raised for both wrong password AND tampered ciphertext.
+        # We intentionally surface a single, non-differentiating error to
+        # prevent oracle-style probing of which condition triggered.
+        raise ValueError("Incorrect password or the QR code data has been tampered with.")
+
+    return plaintext.decode("utf-8")
+
+
+def _encode_payload(secret_text: str, password: Optional[str]) -> str:
+    """Assemble and base64-encode the IVDATA fragment payload.
+
+    Args:
+        secret_text: The plaintext secret to embed.
+        password:    Optional encryption password.
+
+    Returns:
+        ASCII base64 string ready for embedding into the QR fragment.
+    """
+    if password:
+        raw_payload = _encrypt_secret(secret_text, password)
+    else:
+        raw_payload = bytes([FLAG_PLAIN]) + secret_text.encode("utf-8")
+
+    return base64.b64encode(raw_payload).decode("ascii")
+
+
+def _decode_payload(secret_encoded: str, password: Optional[str]) -> str:
+    """Base64-decode and decrypt (if needed) an IVDATA fragment payload.
+
+    Args:
+        secret_encoded: Base64-encoded payload string from the QR fragment.
+        password:       Optional decryption password.
+
+    Returns:
+        Plaintext secret string.
+
+    Raises:
+        ValueError: On any decoding, decryption, or format error.
+    """
+    try:
+        raw_payload = base64.b64decode(secret_encoded)
+    except Exception:
+        raise ValueError("Hidden data could not be decoded — the QR content may be corrupted.")
+
+    if len(raw_payload) < 1:
+        raise ValueError("Invalid payload: missing format flag byte.")
+
+    flag = raw_payload[0]
+    body = raw_payload[1:]
+
+    if flag == FLAG_PLAIN:
+        if password:
+            logger.warning(
+                "A password was provided but the payload is not encrypted; "
+                "the password will be ignored."
+            )
+        return body.decode("utf-8")
+
+    if flag == FLAG_LEGACY_CBC:
+        # M-02 mitigation: refuse to process old unauthenticated payloads.
+        # Decrypting a CBC ciphertext without verifying its integrity first
+        # would expose us to padding-oracle and malleability attacks.
+        raise ValueError(
+            "This QR code was generated with an older, insecure encryption "
+            "scheme (AES-CBC without authentication). "
+            "Please ask the creator to regenerate it with InvisioVault."
+        )
+
+    if flag == FLAG_FERNET:
+        if not password:
+            raise ValueError("This QR code is password protected. Please provide the password.")
+        return _decrypt_secret(body, password)
+
+    raise ValueError(
+        f"Unknown payload format flag 0x{flag:02X}. "
+        "The QR code may have been generated by a newer version of InvisioVault."
+    )
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def generate_qr_with_stego(
     public_data: str,
@@ -18,372 +199,232 @@ def generate_qr_with_stego(
     password: Optional[str] = None,
     fg_color: str = "#000000",
     bg_color: str = "#FFFFFF",
-    scale: int = 20,  # Increased to 20 for better readability
-    logo_path: Optional[str] = None
+    scale: int = 20,
+    logo_path: Optional[str] = None,
 ) -> str:
-    """
-    Generate a QR code with hidden secret text using URL fragment encoding.
-    
-    IMPORTANT: The QR code data contains the public URL + a fragment (#) with the encrypted secret.
-    Normal scanners open the URL and ignore the fragment.
-    InvisioVault parses the full QR data including the fragment to extract the secret.
-    This is robust against camera capture and recompression (unlike LSB steganography).
-    
+    """Generate a QR code with an authenticated-encrypted hidden secret.
+
+    The QR code data is:
+        ``<public_data>#IVDATA:<base64_payload>``
+
+    Standard QR scanners open the URL and silently ignore the fragment.
+    InvisioVault's extractor parses the fragment to recover the secret.
+
+    This approach is robust against camera capture and recompression (unlike
+    LSB pixel steganography) because the secret lives inside the QR data
+    stream itself, not in the image pixels.
+
+    Encryption (when *password* is supplied) uses Fernet, which provides
+    authenticated encryption (AES-128-CBC + HMAC-SHA256).  An attacker who
+    intercepts or modifies the ciphertext will trigger an HMAC failure on
+    decryption — the tampered data is rejected before any plaintext is
+    produced, preventing both padding-oracle and ciphertext-malleability
+    attacks.
+
     Args:
-        public_data: The visible QR code data (URL, text, vCard, etc.)
-        secret_text: The hidden text message to embed
-        output_path: Path where the final QR code will be saved
-        password: Optional password for encrypting the hidden data
-        fg_color: Foreground color in hex format (default: black)
-        bg_color: Background color in hex format (default: white)
-        scale: QR code size multiplier (default: 20)
-        logo_path: Optional path to logo image to embed in center
-        
+        public_data: Visible QR data (URL, vCard, plain text, etc.).
+        secret_text: Hidden message to embed.
+        output_path: Filesystem path where the PNG will be written.
+        password:    Optional password.  ``None`` → plaintext embedding
+                     (flag 0x00).  Non-empty string → Fernet encryption
+                     (flag 0x02).
+        fg_color:    QR module colour in CSS hex notation (default: black).
+        bg_color:    QR background colour in CSS hex notation (default: white).
+        scale:       QR pixel-scale multiplier (default: 20).
+        logo_path:   Optional path to a logo PNG to embed in the centre.
+
     Returns:
-        Path to the generated QR code image
-        
+        *output_path* (unchanged) for convenience.
+
     Raises:
-        ValueError: If QR generation fails
+        ValueError: If QR generation fails for any reason.
     """
     try:
-        import base64
-        import logging
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        from cryptography.hazmat.backends import default_backend
-        from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        import os as os_module
-        
-        logger = logging.getLogger(__name__)
-        
-        # Encrypt the secret text if password is provided
-        if password:
-            logger.info("Encrypting secret with password...")
-            # Generate salt
-            salt = os_module.urandom(16)
-            
-            # Derive key from password
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
-                length=32,
-                salt=salt,
-                iterations=480000,  # OWASP 2023+ recommendation
-                backend=default_backend()
-            )
-            key = kdf.derive(password.encode('utf-8'))
-            
-            # Encrypt secret
-            iv = os_module.urandom(16)
-            cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-            encryptor = cipher.encryptor()
-            
-            # Pad secret text to block size
-            secret_bytes = secret_text.encode('utf-8')
-            padding_length = 16 - (len(secret_bytes) % 16)
-            padded_secret = secret_bytes + bytes([padding_length] * padding_length)
-            
-            encrypted = encryptor.update(padded_secret) + encryptor.finalize()
-            
-            # Combine flag(1) + salt(16) + iv(16) + encrypted data
-            # Flag 0x01 = encrypted, allows reliable detection without length heuristics
-            secret_payload = b'\x01' + salt + iv + encrypted
-        else:
-            # No password - prepend flag 0x00 to mark as plain text
-            # This replaces the unreliable len>=32 magic-number check
-            secret_payload = b'\x00' + secret_text.encode('utf-8')
-        
-        # Encode secret as base64
-        secret_encoded = base64.b64encode(secret_payload).decode('ascii')
-        logger.info(f"Secret encoded to {len(secret_encoded)} base64 characters")
-        
-        # Combine public data and secret using URL fragment
-        # Normal QR scanners will open the URL and ignore everything after #
-        # InvisioVault will parse the full data
+        secret_encoded = _encode_payload(secret_text, password)
+        logger.info("Secret encoded to %d base64 characters.", len(secret_encoded))
+
         combined_qr_data = f"{public_data}#IVDATA:{secret_encoded}"
-        logger.info(f"Combined QR data length: {len(combined_qr_data)} characters")
-        
-        # Generate QR code with the combined data
-        qr = segno.make(combined_qr_data, error='h')
-        
-        # Create temp file
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_qr:
-            temp_qr_path = temp_qr.name
-        
-        # Save QR code with custom colors and scale
-        qr.save(
-            temp_qr_path,
-            scale=scale,
-            dark=fg_color,
-            light=bg_color,
-            border=2
-        )
-        logger.info(f"QR code saved to temp file: {temp_qr_path}")
-        
-        # If logo is provided, embed it
-        if logo_path:
-            logger.info(f"Embedding logo from: {logo_path}")
-            temp_qr_path = _embed_logo_in_qr(temp_qr_path, logo_path)
-        
-        # Convert to proper RGB PNG
-        qr_image = Image.open(temp_qr_path).convert('RGB')
-        qr_image.save(output_path, 'PNG', optimize=False, compress_level=0)
-        logger.info(f"Final QR code saved to: {output_path}")
-        
-        # Clean up
-        if os.path.exists(temp_qr_path):
-            os.remove(temp_qr_path)
-        
+        logger.info("Combined QR data length: %d characters.", len(combined_qr_data))
+
+        qr = segno.make(combined_qr_data, error="h")
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            temp_qr_path = tmp.name
+
+        try:
+            qr.save(temp_qr_path, scale=scale, dark=fg_color, light=bg_color, border=2)
+            logger.info("QR code saved to temp file: %s", temp_qr_path)
+
+            if logo_path:
+                logger.info("Embedding logo from: %s", logo_path)
+                _embed_logo_in_qr(temp_qr_path, logo_path)
+
+            # Convert to plain RGB PNG (no alpha, no palette) for maximum
+            # compatibility with scanners and subsequent LSB operations.
+            Image.open(temp_qr_path).convert("RGB").save(
+                output_path, "PNG", optimize=False, compress_level=0
+            )
+            logger.info("Final QR code saved to: %s", output_path)
+        finally:
+            if os.path.exists(temp_qr_path):
+                os.remove(temp_qr_path)
+
         return output_path
-    
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Failed to generate QR code: {str(e)}", exc_info=True)
-        raise ValueError(f"Failed to generate QR code: {str(e)}")
 
-
-def _embed_logo_in_qr(qr_path: str, logo_path: str) -> str:
-    """
-    Embed a logo image in the center of a QR code.
-    
-    Args:
-        qr_path: Path to the QR code image
-        logo_path: Path to the logo image
-        
-    Returns:
-        Path to the QR code with embedded logo (overwrites original)
-    """
-    # Open QR code and logo
-    qr_img = Image.open(qr_path).convert('RGBA')
-    logo_img = Image.open(logo_path).convert('RGBA')
-    
-    # Calculate logo size (max 20% of QR code size to maintain scannability)
-    qr_width, qr_height = qr_img.size
-    logo_max_size = int(min(qr_width, qr_height) * 0.2)
-    
-    # Resize logo while maintaining aspect ratio
-    logo_img.thumbnail((logo_max_size, logo_max_size), Image.Resampling.LANCZOS)
-    
-    # Calculate position to center the logo
-    logo_width, logo_height = logo_img.size
-    logo_pos = (
-        (qr_width - logo_width) // 2,
-        (qr_height - logo_height) // 2
-    )
-    
-    # Create a white background for the logo to ensure contrast
-    background = Image.new('RGBA', logo_img.size, 'WHITE')
-    background.paste(logo_img, (0, 0), logo_img)
-    
-    # Paste logo onto QR code
-    qr_img.paste(background, logo_pos, background)
-    
-    # Convert back to RGB and save
-    qr_rgb = qr_img.convert('RGB')
-    qr_rgb.save(qr_path, 'PNG')
-    
-    return qr_path
+    except Exception as exc:
+        logger.error("Failed to generate QR code: %s", exc, exc_info=True)
+        raise ValueError(f"Failed to generate QR code: {exc}") from exc
 
 
 def extract_from_qr_stego(
     qr_path: str,
-    password: Optional[str] = None
+    password: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """
-    Extract both visible QR data and hidden secret text from a QR code.
-    
-    The QR code data contains the public URL + a fragment (#IVDATA:) with the encrypted secret.
-    Normal scanners see only the URL part.
-    InvisioVault parses the fragment to extract the secret.
-    
+    """Extract the visible QR data and the hidden secret from a QR code image.
+
+    The QR data is expected to contain an ``#IVDATA:<base64>`` fragment
+    produced by :func:`generate_qr_with_stego`.  QR codes without that
+    fragment are treated as ordinary QR codes — ``secret_text`` is returned
+    as an empty string.
+
+    If the payload was encrypted with a password the ciphertext is verified
+    (HMAC) before any decryption occurs, so a wrong or missing password is
+    detected immediately without leaking timing information about the padding.
+
     Args:
-        qr_path: Path to the QR code image
-        password: Optional password if the hidden data is encrypted
-        
+        qr_path:  Path to the QR code image.
+        password: Decryption password (required if the QR was sealed with one).
+
     Returns:
-        Tuple of (public_qr_data, secret_text)
-        
+        ``(public_qr_data, secret_text)``
+
     Raises:
-        ValueError: If extraction fails
+        ValueError: If no QR code is found, decryption fails, or data is
+                    malformed/tampered.
     """
     try:
-        import base64
-        import logging
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        from cryptography.hazmat.backends import default_backend
-        from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        
-        logger = logging.getLogger(__name__)
-        
-        # Decode QR code data
-        logger.info(f"Extracting from QR code: {qr_path}")
-        img_array = np.array(Image.open(qr_path).convert('RGB'))
+        logger.info("Extracting from QR code: %s", qr_path)
+        img_array = np.array(Image.open(qr_path).convert("RGB"))
         decoded_objects = zxingcpp.read_barcodes(img_array)
 
         if not decoded_objects:
-            raise ValueError("No QR code found in the image")
+            raise ValueError("No QR code found in the image.")
 
-        # Get the full QR data (zxingcpp returns barcode.text as a string)
         qr_data = decoded_objects[0].text
-        logger.info(f"Full QR data: {qr_data[:100]}...")
-        
-        # Check for fragment-based format (#IVDATA:)
-        if '#IVDATA:' in qr_data:
-            parts = qr_data.split('#IVDATA:')
-            public_data = parts[0]
-            secret_encoded = parts[1] if len(parts) > 1 else ""
-            logger.info(f"Found IVDATA fragment. Public data: {public_data}, Secret length: {len(secret_encoded)}")
-            
-            if secret_encoded:
-                try:
-                    # Decode standard base64
-                    secret_payload = base64.b64decode(secret_encoded)
-                    logger.info(f"Decoded secret payload: {len(secret_payload)} bytes")
-                    
-                    # Read the explicit 1-byte encryption flag
-                    # 0x01 = AES-encrypted (salt+iv+ciphertext follow)
-                    # 0x00 = plain UTF-8 text
-                    if len(secret_payload) < 1:
-                        raise ValueError("Invalid payload: missing encryption flag byte")
-                    
-                    is_encrypted = secret_payload[0] == 0x01
-                    payload_body = secret_payload[1:]
-                    
-                    if is_encrypted:
-                        if not password:
-                            logger.warning("Payload is encrypted but no password was provided")
-                            raise ValueError("This QR code is password protected")
-                        
-                        if len(payload_body) < 32:  # salt(16) + iv(16)
-                            raise ValueError("Invalid encrypted data format")
-                        
-                        logger.info("Decrypting with password...")
-                        # Extract salt (16 bytes) and IV (16 bytes)
-                        salt = payload_body[:16]
-                        iv = payload_body[16:32]
-                        encrypted_data = payload_body[32:]
-                        
-                        # Derive key from password
-                        kdf = PBKDF2HMAC(
-                            algorithm=hashes.SHA256(),
-                            length=32,
-                            salt=salt,
-                            iterations=480000,  # OWASP 2023+ recommendation
-                            backend=default_backend()
-                        )
-                        key = kdf.derive(password.encode('utf-8'))
-                        
-                        # Decrypt
-                        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-                        decryptor = cipher.decryptor()
-                        decrypted_padded = decryptor.update(encrypted_data) + decryptor.finalize()
-                        
-                        # Remove padding
-                        padding_length = decrypted_padded[-1]
-                        secret_text = decrypted_padded[:-padding_length].decode('utf-8')
-                        logger.info(f"Successfully decrypted secret: {len(secret_text)} characters")
-                    else:
-                        # Flag is 0x00: plain text regardless of payload size
-                        if password:
-                            logger.warning("Password provided but payload is not encrypted; ignoring password")
-                        secret_text = payload_body.decode('utf-8')
-                        logger.info(f"Decoded plain text secret: {len(secret_text)} characters")
-                    
-                except base64.binascii.Error:
-                    logger.error("Failed to decode base64 data")
-                    raise ValueError("Failed to decode hidden data")
-                except ValueError as e:
-                    if "password" in str(e).lower():
-                        raise
-                    logger.error(f"Decryption error: {str(e)}")
-                    raise ValueError(f"Failed to decrypt hidden data: {str(e)}")
-            else:
-                secret_text = ""
-        else:
-            # Regular QR code without hidden data
-            logger.info("No IVDATA fragment found - regular QR code")
-            public_data = qr_data
-            secret_text = ""
-        
-        logger.info(f"Extraction complete. Public: {len(public_data)} chars, Secret: {len(secret_text)} chars")
+        logger.info("Full QR data (first 100 chars): %s", qr_data[:100])
+
+        if "#IVDATA:" not in qr_data:
+            logger.info("No IVDATA fragment found — treating as a regular QR code.")
+            return qr_data, ""
+
+        parts = qr_data.split("#IVDATA:", maxsplit=1)
+        public_data = parts[0]
+        secret_encoded = parts[1] if len(parts) > 1 else ""
+
+        if not secret_encoded:
+            return public_data, ""
+
+        secret_text = _decode_payload(secret_encoded, password)
+        logger.info(
+            "Extraction complete. Public: %d chars, Secret: %d chars.",
+            len(public_data),
+            len(secret_text),
+        )
         return public_data, secret_text
-    
+
     except ValueError:
         raise
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Failed to extract data from QR code: {str(e)}", exc_info=True)
-        raise ValueError(f"Failed to extract data from QR code: {str(e)}")
+    except Exception as exc:
+        logger.error("Failed to extract data from QR code: %s", exc, exc_info=True)
+        raise ValueError(f"Failed to extract data from QR code: {exc}") from exc
 
 
-def calculate_qr_capacity(
-    public_data: str,
-    scale: int = 10
-) -> int:
-    """
-    Calculate the steganography capacity of a QR code based on its size.
-    
+def calculate_qr_capacity(public_data: str, scale: int = 10) -> int:
+    """Estimate the LSB steganography capacity of a QR code in bytes.
+
+    This is an informational helper for UI feedback; it does not affect the
+    security of the hidden payload (which lives in the QR data stream).
+
     Args:
-        public_data: The public QR data (determines QR code complexity)
-        scale: QR code size multiplier
-        
+        public_data: The public QR data (determines QR version and size).
+        scale:       QR pixel-scale multiplier.
+
     Returns:
-        Estimated capacity in bytes for steganographic data
+        Estimated capacity in bytes; 0 if the QR cannot be generated.
     """
     try:
-        # Generate temporary QR to measure size
-        qr = segno.make(public_data, error='h')
-        
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-            temp_path = temp_file.name
-        
+        qr = segno.make(public_data, error="h")
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            temp_path = tmp.name
+
         try:
             qr.save(temp_path, scale=scale, border=2)
-            
-            # Open image and calculate capacity (no pixel-list allocation)
-            img = Image.open(temp_path).convert('RGB')
-            total_pixels = img.width * img.height
-            
-            # Capacity: 3 bits per pixel (1 per RGB channel) / 8 = bytes
-            # Subtract overhead for metadata (~100 bytes)
-            capacity_bytes = (total_pixels * 3) // 8 - 100
-            
+            img = Image.open(temp_path).convert("RGB")
+            # 3 bits per pixel (1 per RGB channel) divided by 8 → bytes.
+            # Subtract a small header overhead estimate.
+            capacity_bytes = (img.width * img.height * 3) // 8 - 100
             return max(0, capacity_bytes)
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
-    
+
     except Exception:
-        # Default estimate if calculation fails
-        return 90000  # ~90KB for typical QR code
+        return 90_000  # Conservative fallback for typical QR dimensions
 
 
 def decode_qr_only(qr_path: str) -> str:
-    """
-    Decode only the visible QR code data without extracting steganography.
-    
+    """Decode only the visible QR code data, without secret extraction.
+
     Args:
-        qr_path: Path to the QR code image
-        
+        qr_path: Path to the QR code image.
+
     Returns:
-        The visible QR code data as a string
-        
+        The raw QR data string as decoded by the zxing-cpp library.
+
     Raises:
-        ValueError: If no QR code is found
+        ValueError: If no QR code is found in the image.
     """
     try:
-        img_array = np.array(Image.open(qr_path).convert('RGB'))
+        img_array = np.array(Image.open(qr_path).convert("RGB"))
         decoded_objects = zxingcpp.read_barcodes(img_array)
 
         if not decoded_objects:
-            raise ValueError("No QR code found in the image")
+            raise ValueError("No QR code found in the image.")
 
-        # zxingcpp returns barcode.text as a string directly
         return decoded_objects[0].text
-    
+
     except ValueError:
         raise
-    except Exception as e:
-        raise ValueError(f"Failed to decode QR code: {str(e)}")
+    except Exception as exc:
+        raise ValueError(f"Failed to decode QR code: {exc}") from exc
+
+
+# ── Private helpers ───────────────────────────────────────────────────────────
+
+def _embed_logo_in_qr(qr_path: str, logo_path: str) -> None:
+    """Embed a logo image in the centre of a QR code (in-place).
+
+    The logo is scaled to at most 20 % of the QR's shorter dimension to
+    preserve scannability at the 'H' error-correction level.
+
+    Args:
+        qr_path:   Path to the QR code PNG (overwritten in place).
+        logo_path: Path to the logo image (any PIL-supported format).
+    """
+    qr_img = Image.open(qr_path).convert("RGBA")
+    logo_img = Image.open(logo_path).convert("RGBA")
+
+    qr_w, qr_h = qr_img.size
+    max_logo = int(min(qr_w, qr_h) * 0.20)
+    logo_img.thumbnail((max_logo, max_logo), Image.Resampling.LANCZOS)
+
+    logo_w, logo_h = logo_img.size
+    pos = ((qr_w - logo_w) // 2, (qr_h - logo_h) // 2)
+
+    # White backing card ensures contrast regardless of QR background colour.
+    backing = Image.new("RGBA", logo_img.size, "WHITE")
+    backing.paste(logo_img, (0, 0), logo_img)
+
+    qr_img.paste(backing, pos, backing)
+    qr_img.convert("RGB").save(qr_path, "PNG")
