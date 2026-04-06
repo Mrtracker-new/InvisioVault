@@ -3,8 +3,9 @@ import segno
 from PIL import Image
 import io
 import os
+import numpy as np
+import zxingcpp
 from typing import Optional, Tuple
-from pyzbar.pyzbar import decode as _pyzbar_decode
 import tempfile
 
 from utils.steganography import hide_file_in_image, extract_file_from_image
@@ -217,13 +218,14 @@ def extract_from_qr_stego(
         
         # Decode QR code data
         logger.info(f"Extracting from QR code: {qr_path}")
-        decoded_objects = _pyzbar_decode(Image.open(qr_path))
+        img_array = np.array(Image.open(qr_path).convert('RGB'))
+        decoded_objects = zxingcpp.read_barcodes(img_array)
 
         if not decoded_objects:
             raise ValueError("No QR code found in the image")
 
-        # Get the full QR data (pyzbar returns bytes via .data)
-        qr_data = decoded_objects[0].data.decode("utf-8")
+        # Get the full QR data (zxingcpp returns barcode.text as a string)
+        qr_data = decoded_objects[0].text
         logger.info(f"Full QR data: {qr_data[:100]}...")
         
         # Check for fragment-based format (#IVDATA:)
@@ -372,13 +374,14 @@ def decode_qr_only(qr_path: str) -> str:
         ValueError: If no QR code is found
     """
     try:
-        decoded_objects = _pyzbar_decode(Image.open(qr_path))
+        img_array = np.array(Image.open(qr_path).convert('RGB'))
+        decoded_objects = zxingcpp.read_barcodes(img_array)
 
         if not decoded_objects:
             raise ValueError("No QR code found in the image")
 
-        # pyzbar returns bytes; decode to string
-        return decoded_objects[0].data.decode("utf-8")
+        # zxingcpp returns barcode.text as a string directly
+        return decoded_objects[0].text
     
     except ValueError:
         raise
