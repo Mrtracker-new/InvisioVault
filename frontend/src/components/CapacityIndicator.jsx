@@ -85,6 +85,11 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
     }
 
     useEffect(() => {
+        // AbortController lets us cancel the in-flight request when:
+        //   - the user swaps files before the previous request finishes, or
+        //   - the component unmounts mid-request.
+        const controller = new AbortController()
+
         const calculateCapacity = async () => {
             if (!carrierFile) {
                 setCapacity(null)
@@ -102,7 +107,13 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
                 const response = await axios.post(`${API_URL}/api/calculate-capacity`, formData, {
                     headers: {
                         'Content-Type': 'multipart/form-data'
-                    }
+                    },
+                    // Cancel this request if the user changes files or the
+                    // component unmounts before the server responds.
+                    signal: controller.signal,
+                    // Hard timeout: if the backend is cold/unreachable, give up
+                    // after 15 s instead of hanging forever.
+                    timeout: 15000
                 })
 
                 const totalBytes = response.data.totalCapacityBytes
@@ -119,9 +130,21 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
                     usedFormatted: formatBytes(usedBytes)
                 })
             } catch (err) {
-                setError(err.response?.data?.error || 'Failed to calculate capacity')
+                // Ignore cancellation errors — they are intentional cleanup,
+                // not real failures (e.g. user picked a different file).
+                if (axios.isCancel(err) || err.name === 'CanceledError') return
+
+                if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+                    setError('Server is taking too long to respond. Please try again.')
+                } else {
+                    setError(err.response?.data?.error || 'Failed to calculate capacity')
+                }
             } finally {
-                setLoading(false)
+                // Only clear the spinner if this request was NOT cancelled.
+                // If it was cancelled a new request is already on the way.
+                if (!controller.signal.aborted) {
+                    setLoading(false)
+                }
             }
         }
 
@@ -130,7 +153,12 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
             calculateCapacity()
         }, 500) // 500ms delay
 
-        return () => clearTimeout(timeoutId)
+        return () => {
+            clearTimeout(timeoutId)
+            // Cancel the in-flight HTTP request so it doesn't setState on an
+            // unmounted component or clobber a newer request's result.
+            controller.abort()
+        }
     }, [carrierFile, hiddenFile, hiddenText, password, mode])
 
     if (!carrierFile || (!hiddenFile && !hiddenText)) {
