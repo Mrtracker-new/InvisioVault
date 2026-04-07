@@ -6,11 +6,12 @@ services:
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    # 1 worker + 2 threads: free tier has ~512 MB RAM; one sync worker avoids
-    # OOM. Two threads within the worker handle overlapping I/O without blocking
-    # the health check. --preload loads the app once before forking — faster
-    # startup means Render's first health probe is answered before the timeout.
-    startCommand: gunicorn app:app --workers 1 --threads 2 --timeout 120 --graceful-timeout 30 --bind 0.0.0.0:$PORT --preload --log-level info
+    # All gunicorn options (workers, threads, timeout, preload, hooks) live in
+    # backend/gunicorn.conf.py, which gunicorn auto-discovers from the rootDir.
+    # Keeping options in one place prevents drift between Procfile, render.yaml,
+    # and code.  The post_fork hook in gunicorn.conf.py starts the
+    # FileCleanupScheduler safely inside each worker — not in the master process.
+    startCommand: gunicorn app:app
     envVars:
       - key: FLASK_ENV
         value: production
