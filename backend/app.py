@@ -5,7 +5,6 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import logging
 import os
-import atexit
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -13,7 +12,11 @@ load_dotenv()
 
 from config.settings import config
 from api.routes import api
-from utils.cleanup import init_cleanup_scheduler, stop_cleanup_scheduler
+# NOTE: init_cleanup_scheduler is NOT imported here.
+# Production: started by gunicorn.conf.py post_fork hook (once per worker, after fork).
+# Development: started in the __main__ block below.
+# Starting it inside create_app() is WRONG under --preload: the thread would
+# be born in the master process and killed by os.fork() before the worker runs.
 
 
 def create_app(config_name='default'):
@@ -155,41 +158,48 @@ def create_app(config_name='default'):
         resp.headers['Retry-After'] = '60'
         return resp
 
-    # Create upload folder
+    # Create upload folder (safe even if it already exists)
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    
-    # Initialize file cleanup scheduler
-    # Runs every 10 minutes, deletes files older than 1 hour
-    max_age_hours = int(os.getenv('FILE_MAX_AGE_HOURS', '1'))
-    cleanup_interval = int(os.getenv('CLEANUP_INTERVAL_MINUTES', '10'))
-    init_cleanup_scheduler(app.config['UPLOAD_FOLDER'], max_age_hours, cleanup_interval)
-    
-    # Ensure cleanup stops when app shuts down
-    atexit.register(stop_cleanup_scheduler)
-    
-    # NOTE: The root route is registered above (exempt from rate limiting).
-    # Keeping this comment so the logical flow is easy to follow.
-    
+
+    # NOTE: FileCleanupScheduler is NOT started here.
+    # See module docstring at the top of this file for the rationale.
+
     return app
 
 
-# Create app instance for gunicorn
+# ---------------------------------------------------------------------------
+# WSGI entry point
+# ---------------------------------------------------------------------------
+# Gunicorn imports this module and uses the `app` name as the WSGI callable.
+# With --preload (set in gunicorn.conf.py) this runs once in the master process
+# before any workers are forked.  create_app() must therefore be free of
+# process-level side effects such as starting threads — those belong in the
+# gunicorn.conf.py post_fork hook.
 env = os.getenv('FLASK_ENV', 'development')
 app = create_app(env)
 
-# Log startup information for deployment debugging
-port = int(os.getenv('PORT', 5000))
-app.logger.info(f"========================================")
-app.logger.info(f"InvisioVault Backend Starting")
-app.logger.info(f"Environment: {env}")
-app.logger.info(f"Port: {port}")
-app.logger.info(f"Debug Mode: {app.config['DEBUG']}")
-app.logger.info(f"========================================")
 
 if __name__ == '__main__':
-    app.logger.info(f"Running in development mode on 0.0.0.0:{port}")
+    # Development server path — Flask's built-in server, no gunicorn.
+    # We start the scheduler here because there is no post_fork hook.
+    from utils.cleanup import init_cleanup_scheduler, stop_cleanup_scheduler
+    import atexit
+
+    upload_folder   = app.config['UPLOAD_FOLDER']
+    max_age_hours   = int(os.getenv('FILE_MAX_AGE_HOURS',        '1'))
+    interval_mins   = int(os.getenv('CLEANUP_INTERVAL_MINUTES', '10'))
+    init_cleanup_scheduler(upload_folder, max_age_hours, interval_mins)
+    atexit.register(stop_cleanup_scheduler)  # Clean shutdown for dev server only
+
+    port = int(os.getenv('PORT', 5000))
+    app.logger.info("========================================")
+    app.logger.info("InvisioVault Backend — Development Server")
+    app.logger.info(f"Environment : {env}")
+    app.logger.info(f"Port        : {port}")
+    app.logger.info(f"Debug Mode  : {app.config['DEBUG']}")
+    app.logger.info("========================================")
     app.run(
         host='0.0.0.0',
         port=port,
-        debug=app.config['DEBUG']
+        debug=app.config['DEBUG'],
     )
