@@ -1,8 +1,6 @@
 """Flask application factory for InvisioVault API."""
 from flask import Flask, request
 from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 import logging
 import os
 from dotenv import load_dotenv
@@ -12,6 +10,7 @@ load_dotenv()
 
 from config.settings import config
 from api.routes import api
+from extensions import limiter   # shared Limiter instance (no app yet)
 # NOTE: init_cleanup_scheduler is NOT imported here.
 # Production: started by gunicorn.conf.py post_fork hook (once per worker, after fork).
 # Development: started in the __main__ block below.
@@ -44,22 +43,22 @@ def create_app(config_name='default'):
     # Log CORS origins for debugging
     app.logger.info(f"CORS enabled for origins: {app.config['CORS_ORIGINS']}")
     
-    # Setup rate limiting to prevent abuse and DOS attacks
-    # Global limits: 200 requests per day, 100 per hour per IP
-    # This accommodates capacity calculator calls while still preventing abuse
-    # Heavy operations (hide/create): 10 per hour (handled by specific limits)
-    # Light operations (extract, capacity): covered by global limit
-    limiter = Limiter(
-        app=app,
-        key_func=get_remote_address,
-        default_limits=["200 per day", "100 per hour"],
-        storage_uri=os.getenv('REDIS_URL', 'memory://'),
-        strategy="fixed-window",
-        headers_enabled=True  # Add rate limit headers to responses
-    )
-    
-    # Store limiter in app for use in routes
-    app.limiter = limiter
+    # ---------------------------------------------------------------------------
+    # Rate limiting
+    # ---------------------------------------------------------------------------
+    # All configuration (default_limits, storage_uri, strategy, headers_enabled)
+    # and all per-route decorators (@limiter.limit, @limiter.exempt) are declared
+    # in extensions.py and routes.py respectively.  flask-limiter 3.x requires
+    # all constructor options to be passed to Limiter() — init_app() only accepts
+    # the Flask app object.
+    #
+    # endpoint summary:
+    #   /api/health : @limiter.exempt  (routes.py)
+    #   /qr/detect  : @limiter.limit("60 per minute")  (routes.py)
+    #   /           : @limiter.exempt  (below, after blueprint registration)
+    #   all others  : global 200/day + 100/hour  (extensions.py Limiter ctor)
+    limiter.init_app(app)
+
     
     # Setup logging
     logging.basicConfig(
@@ -115,35 +114,32 @@ def create_app(config_name='default'):
         
         return response
     
-    # Register blueprints
+    # Register blueprints — must happen AFTER limiter.init_app() so that the
+    # per-route limits already attached as decorators in routes.py are correctly
+    # wired to the app's request lifecycle.
     app.register_blueprint(api)
 
-    # Apply a dedicated, tighter rate limit to /qr/detect.
-    # The camera scanner polls this endpoint every 500 ms (≈ 120 req/min at 2 fps).
-    # Without a per-route cap, a single IP can exhaust the global 100/hour budget
-    # entirely through this one endpoint, blocking all other operations.
-    # 60 req/min leaves headroom for normal 2-fps scanning while blocking floods.
-    from api.routes import detect_qr  # import the view function by name
-    limiter.limit("60 per minute")(detect_qr)
-
-    # Exempt the health check and root from rate limiting entirely.
-    # Render probes /api/health every ~10 seconds — if it ever gets a 429 the
-    # instance is marked unhealthy and a restart/redeploy cascade begins.
-    # The root index is similarly low-cost and should always respond 200.
-    from api.routes import health_check  # import the view function by name
-    limiter.exempt(health_check)
-
+    # Root probe — Render (and any monitoring system) occasionally hits / to
+    # confirm the server is alive.  Exempt it from rate limiting so it can
+    # never return a 429.  The decorator form is used (not the post-registration
+    # limiter.exempt(fn) call) because the limiter instance is already bound to
+    # `app` at this point and the route is registered on `app` directly (not a
+    # blueprint), so no endpoint-name ambiguity arises.
     @app.route('/')
     @limiter.exempt
-    def _root_exempt():
-        """Root probe — exempt from rate limiting so it always responds 200."""
+    def _root_probe():
+        """Root health probe — always responds 200, exempt from rate limiting."""
         return {
             'name': 'InvisioVault API',
             'status': 'running',
             'version': '2.0.1'
         }
 
-    app.logger.info("Rate-limit exemptions applied: /api/health, /")
+    app.logger.info(
+        "Rate-limit active — per-route limits and exemptions declared in routes.py:"
+        " /qr/detect=60/min, /api/health=exempt, /=exempt"
+    )
+
 
     # Return clean JSON on rate-limit breach so clients (including the camera
     # scanner) can handle 429s gracefully instead of receiving an HTML error page.
