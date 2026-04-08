@@ -11,6 +11,14 @@ import hashlib
 import re
 import time
 
+# Import the shared limiter instance (created in extensions.py without a bound
+# app so it can be imported here before the app factory runs).  This is the
+# canonical Flask application-factory pattern for extensions that need to
+# decorate routes in a Blueprint — the limit is registered on the function
+# *before* register_blueprint() resolves endpoint names, so flask-limiter
+# can correctly map it to the "api.detect_qr" / "api.health_check" endpoints.
+from extensions import limiter
+
 from utils.steganography import hide_file_in_image, extract_file_from_image
 from utils.polyglot import create_polyglot, extract_from_polyglot
 from utils.validators import validate_image, validate_hideable_file
@@ -81,14 +89,27 @@ def _format_bytes(bytes_val: int) -> str:
 
 
 @api.route('/health', methods=['GET'])
+@limiter.exempt
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint.
+
+    Exempt from rate limiting so Render's health probe (every ~10 s) never
+    receives a 429 and never triggers a false-positive unhealthy status.
+    The exemption is applied here — before blueprint registration — so
+    flask-limiter correctly resolves it to the 'api.health_check' endpoint.
+    """
     return jsonify({'status': 'ok', 'message': 'InvisioVault API is running'}), 200
 
 
 @api.route('/calculate-capacity', methods=['POST'])
+@limiter.limit("30 per minute", override_defaults=False)
 def calculate_capacity():
-    """Calculate the available steganography capacity for an image."""
+    """Calculate the available steganography capacity for an image.
+
+    Tighter limit than the global default: the UI calls this on every image
+    select/drop.  30/min gives plenty of headroom for normal use while
+    preventing a bot from using it as a cheap I/O-amplification vector.
+    """
     try:
         # Validate request
         image = request.files.get('image')
@@ -141,9 +162,14 @@ def calculate_capacity():
 
 
 @api.route('/hide', methods=['POST'])
+@limiter.limit("10 per hour", override_defaults=False)
 def hide_file():
-    """Hide a file in an image."""
-    # Rate limiting handled at app level
+    """Hide a file in an image.
+
+    Heavy endpoint: full LSB-steganography encode over every pixel channel,
+    plus disk I/O for large files.  10/hour per IP throttles brute-force
+    capacity probing and resource exhaustion while leaving normal use unaffected.
+    """
     try:
         # Validate request
         image = request.files.get('image')
@@ -212,8 +238,13 @@ def hide_file():
 
 
 @api.route('/download/<download_id>', methods=['GET'])
+@limiter.limit("30 per minute", override_defaults=False)
 def download_image(download_id):
-    """Download the image with hidden file."""
+    """Download the image with hidden file.
+
+    Low-cost file-serve endpoint.  30/min prevents download-storm abuse on
+    a known or guessed download ID while keeping the UX smooth.
+    """
     try:
         # Strict allowlist: token_urlsafe(16) produces exactly 22 Base64url chars.
         # Rejects URL-encoded traversal sequences, null bytes, OS separators, etc. (C-01)
@@ -239,8 +270,14 @@ def download_image(download_id):
 
 
 @api.route('/extract', methods=['POST'])
+@limiter.limit("10 per hour", override_defaults=False)
 def extract_file():
-    """Extract a hidden file from an image."""
+    """Extract a hidden file from an image.
+
+    Heavy endpoint: full LSB decode + optional AES-GCM decryption.  The tight
+    10/hour limit also mitigates password brute-forcing via repeated extraction
+    attempts with different passwords.
+    """
     try:
         # Validate request
         image = request.files.get('image')
@@ -291,8 +328,13 @@ def extract_file():
 
 
 @api.route('/polyglot/create', methods=['POST'])
+@limiter.limit("10 per hour", override_defaults=False)
 def create_polyglot_file():
-    """Create a polyglot file by appending hidden data to a carrier file."""
+    """Create a polyglot file by appending hidden data to a carrier file.
+
+    Heavy endpoint: ZIP construction, large file I/O, and optional AES-GCM
+    encryption.  Equivalent cost to /hide — same 10/hour limit.
+    """
     try:
         # Validate request
         carrier_file = request.files.get('carrier')
@@ -348,8 +390,12 @@ def create_polyglot_file():
 
 
 @api.route('/polyglot/download/<download_id>', methods=['GET'])
+@limiter.limit("30 per minute", override_defaults=False)
 def download_polyglot(download_id):
-    """Download the polyglot file."""
+    """Download the polyglot file.
+
+    Low-cost file-serve endpoint.  30/min mirrors the /download limit.
+    """
     try:
         # Validate filename: must be token_urlsafe(16) (22 chars) + dot + extension.
         # This prevents path traversal and cross-user file enumeration (P2-07).
@@ -374,8 +420,13 @@ def download_polyglot(download_id):
 
 
 @api.route('/polyglot/extract', methods=['POST'])
+@limiter.limit("10 per hour", override_defaults=False)
 def extract_from_polyglot_file():
-    """Extract hidden file from a polyglot file."""
+    """Extract hidden file from a polyglot file.
+
+    Heavy endpoint: ZIP parse, optional AES-GCM decryption.  Same cost and
+    password-oracle risk as /extract — same 10/hour limit.
+    """
     try:
         # Validate request
         polyglot_file = request.files.get('file')
@@ -423,8 +474,14 @@ def extract_from_polyglot_file():
 
 
 @api.route('/qr/generate', methods=['POST'])
+@limiter.limit("20 per hour", override_defaults=False)
 def generate_qr_code():
-    """Generate a customized QR code with hidden steganographic text."""
+    """Generate a customized QR code with hidden steganographic text.
+
+    Medium-cost endpoint: QR matrix generation + AES-GCM encryption +
+    optional logo compositing.  20/hour allows reasonable user activity
+    while preventing bulk QR generation abuse.
+    """
     try:
         # Validate request
         public_data = request.form.get('public_data', '').strip()
@@ -509,8 +566,12 @@ def generate_qr_code():
 
 
 @api.route('/qr/download/<download_id>', methods=['GET'])
+@limiter.limit("30 per minute", override_defaults=False)
 def download_qr_code(download_id):
-    """Download the generated QR code."""
+    """Download the generated QR code.
+
+    Low-cost file-serve endpoint.  30/min mirrors the other download limits.
+    """
     try:
         # Strict allowlist: token_urlsafe(16) produces exactly 22 Base64url chars.
         # Rejects URL-encoded traversal sequences, null bytes, OS separators, etc. (C-01)
@@ -536,8 +597,14 @@ def download_qr_code(download_id):
 
 
 @api.route('/qr/scan', methods=['POST'])
+@limiter.limit("20 per hour", override_defaults=False)
 def scan_qr_code():
-    """Scan a QR code and extract both public and hidden data."""
+    """Scan a QR code and extract both public and hidden data.
+
+    Medium-cost endpoint: full QR decode + AES-GCM decryption + stego pixel
+    scan.  20/hour prevents password-oracle abuse via repeated scan attempts
+    while accommodating legitimate multi-scan workflows.
+    """
     qr_path = None
     try:
         # Validate request
@@ -598,8 +665,12 @@ def scan_qr_code():
 
 
 @api.route('/qr/extract', methods=['POST'])
+@limiter.limit("20 per hour", override_defaults=False)
 def extract_qr_manual():
-    """Manually extract hidden data from QR code (with password)."""
+    """Manually extract hidden data from QR code (with password).
+
+    Same cost and risk profile as /qr/scan — same 20/hour limit.
+    """
     try:
         # Validate request
         qr_image = request.files.get('image')
@@ -644,8 +715,13 @@ def extract_qr_manual():
 
 
 @api.route('/qr/capacity', methods=['POST'])
+@limiter.limit("60 per minute", override_defaults=False)
 def qr_capacity():
-    """Calculate steganography capacity for a QR code."""
+    """Calculate steganography capacity for a QR code.
+
+    Negligible cost: pure arithmetic, no I/O.  60/min matches /qr/detect
+    since this is also polled on user input during QR setup.
+    """
     try:
         public_data = request.form.get('public_data', '')
         scale = int(request.form.get('scale', 15))
@@ -664,13 +740,19 @@ def qr_capacity():
 
 
 @api.route('/qr/detect', methods=['POST'])
+@limiter.limit("60 per minute")
 def detect_qr():
     """Quick QR detection endpoint for camera scanner - just checks if QR exists.
 
-    This endpoint is polled at up to 2 fps by the camera scanner (every 500ms).
-    A dedicated rate limit of 60 requests/minute per IP is applied via the
-    limiter in create_app() (see app.py) to prevent camera-flood attacks from
-    exhausting the global daily/hourly budget and starving other endpoints.
+    The camera scanner polls this endpoint at up to 2 fps (every 500 ms).
+    A tighter per-route limit of 60 req/min per IP is applied via the decorator
+    above.  This must be declared HERE — before blueprint registration resolves
+    the endpoint name to 'api.detect_qr' — so flask-limiter correctly enforces
+    the limit.  Calling limiter.limit()() on a view function *after*
+    register_blueprint() operates on the raw function object rather than the
+    registered endpoint name and may silently not be enforced (undefined
+    behaviour in flask-limiter 3.x).  See extensions.py for the shared limiter
+    instance and app.py for limiter.init_app().
     """
     filepath = None
     try:
