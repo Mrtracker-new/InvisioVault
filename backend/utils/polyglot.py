@@ -12,7 +12,9 @@ adding the carrier size — that is what _fix_zip_offsets() does.
 """
 from __future__ import annotations
 
+import mmap
 import os
+import shutil
 import struct
 import tempfile
 import zipfile
@@ -157,26 +159,33 @@ def extract_from_polyglot(
         ValueError: If no hidden file is found or extraction fails.
     """
     try:
+        file_size = os.path.getsize(polyglot_path)
+        if file_size == 0:
+            raise ValueError("Polyglot file is empty")
+
         with open(polyglot_path, "rb") as fh:
-            data = fh.read()
+            # Memory-map instead of fh.read(): the OS pages the file in and
+            # out on demand, so peak RSS stays O(pages touched) instead of
+            # O(file size).  The EOCD scan and CD walk only touch the tail.
+            with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                zip_start = _locate_zip_start(mm)
 
-        zip_start = _locate_zip_start(data)
+                if zip_start < 0 or zip_start >= file_size:
+                    raise ValueError("Invalid ZIP start offset derived from polyglot")
 
-        if zip_start < 0 or zip_start >= len(data):
-            raise ValueError("Invalid ZIP start offset derived from polyglot")
-
-        zip_data = data[zip_start:]
-
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-        try:
-            os.write(tmp_fd, zip_data)
-            os.close(tmp_fd)
-            return _read_zip(tmp_path, password)
-        finally:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+                # Stream the ZIP portion to a temp file in chunks — never
+                # materialise it as one bytes object.
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+                try:
+                    with os.fdopen(tmp_fd, "wb") as tmp_fh:
+                        fh.seek(zip_start)
+                        shutil.copyfileobj(fh, tmp_fh, length=1 << 20)
+                    return _read_zip(tmp_path, password)
+                finally:
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
 
     except ValueError:
         raise
@@ -214,10 +223,14 @@ def _stream_concat(src_a: str, src_b: str, dst: str) -> int:
     return carrier_size
 
 
-def _locate_zip_start(data: bytes) -> int:
+def _locate_zip_start(data) -> int:
     """Return the absolute byte offset of the first ZIP Local File Header
     in ``data``, derived from the ZIP central directory (not from a naive
     ``find(b'PK\\x03\\x04')`` which is unreliable for ZIP-based carriers).
+
+    ``data`` may be ``bytes`` or an ``mmap.mmap`` — only ``rfind``, slicing,
+    ``len`` and the buffer protocol (``struct.unpack_from``) are used, so a
+    memory-mapped file works without copying it into RAM.
 
     Handles both standard EOCD (32-bit offsets) and ZIP64 EOCD (64-bit).
     """
@@ -272,7 +285,7 @@ def _locate_zip_start(data: bytes) -> int:
 
 
 def _z64_extra_lho(
-    data: bytes,
+    data,
     extra_start: int,
     extra_len: int,
     uncomp_32: int,
@@ -336,9 +349,11 @@ def _fix_zip_offsets(file_path: str, offset: int) -> None:
        When this holds 0xFFFFFFFF (ZIP64 sentinel), the real 8-byte value
        lives in the ZIP64 Extra Field (tag 0x0001) inside that CD entry.
 
-    The entire file is read into a ``bytearray``, all patches applied in
-    memory, and the result written back in one atomic ``write()`` call so
-    that the file is never left in a partially-patched state on disk.
+    The file is memory-mapped and patched **in place**: only the pages
+    actually touched (EOCD / locator / CD headers, all near the end of the
+    file) are ever resident, so peak memory is O(structures patched), not
+    O(file size).  ``mmap.flush()`` is called before closing so the patches
+    are durable on return.
 
     Args:
         file_path: Path to the polyglot file to patch in-place.
@@ -348,12 +363,19 @@ def _fix_zip_offsets(file_path: str, offset: int) -> None:
         ValueError: If the ZIP structure is malformed or unpatchable.
     """
     with open(file_path, "r+b") as fh:
-        data = bytearray(fh.read())
+        with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_WRITE) as data:
+            _fix_zip_offsets_mm(data, offset)
+            data.flush()
+
+
+def _fix_zip_offsets_mm(data: mmap.mmap, offset: int) -> None:
+    """Apply the offset patches described in :func:`_fix_zip_offsets` to a
+    writable memory-mapped buffer."""
 
     # ---------------------------------------------------------------------- #
     # 1. Standard EOCD                                                        #
     # ---------------------------------------------------------------------- #
-    eocd_pos = bytes(data).rfind(_SIG_EOCD)
+    eocd_pos = data.rfind(_SIG_EOCD)
     if eocd_pos == -1:
         return  # Not a ZIP — nothing to do (caller checked; be defensive)
     if len(data) - eocd_pos < 22:
@@ -377,7 +399,7 @@ def _fix_zip_offsets(file_path: str, offset: int) -> None:
     # ---------------------------------------------------------------------- #
     # 2 & 3. ZIP64 EOCD Locator + ZIP64 EOCD                                 #
     # ---------------------------------------------------------------------- #
-    z64_loc_pos = bytes(data).rfind(_SIG_Z64_LOC, 0, eocd_pos)
+    z64_loc_pos = data.rfind(_SIG_Z64_LOC, 0, eocd_pos)
 
     if z64_loc_pos != -1:
         if len(data) - z64_loc_pos < 20:
@@ -391,7 +413,7 @@ def _fix_zip_offsets(file_path: str, offset: int) -> None:
 
         # Verify the ZIP64 EOCD record at the OLD position in the buffer
         if (old_z64_eoc_offset + 56 > len(data) or
-                data[old_z64_eoc_offset: old_z64_eoc_offset + 4] != bytearray(_SIG_Z64_EOC)):
+                data[old_z64_eoc_offset: old_z64_eoc_offset + 4] != _SIG_Z64_EOC):
             # The offset in the locator does not point to a valid ZIP64 EOCD.
             # If we still have the standard CD offset, continue without ZIP64.
             if actual_cd_offset is None:
@@ -425,7 +447,7 @@ def _fix_zip_offsets(file_path: str, offset: int) -> None:
     # 4. Walk the Central Directory; patch each entry's local-header offset   #
     # ---------------------------------------------------------------------- #
     cd_pos = actual_cd_offset
-    while cd_pos + _CDFH_SIZE <= len(data) and data[cd_pos: cd_pos + 4] == bytearray(_SIG_CDFH):
+    while cd_pos + _CDFH_SIZE <= len(data) and data[cd_pos: cd_pos + 4] == _SIG_CDFH:
         lho_32 = struct.unpack_from("<I", data, cd_pos + _CDFH_OFF_LHO)[0]
 
         name_len    = struct.unpack_from("<H", data, cd_pos + _CDFH_OFF_NAME_LEN)[0]
@@ -458,13 +480,9 @@ def _fix_zip_offsets(file_path: str, offset: int) -> None:
 
         cd_pos = next_cd_pos
 
-    # Atomic write: one call replaces the entire file content
-    with open(file_path, "wb") as fh:
-        fh.write(data)
-
 
 def _patch_z64_extra_lho(
-    data: bytearray,
+    data,
     extra_start: int,
     extra_len: int,
     uncomp_32: int,
@@ -473,6 +491,8 @@ def _patch_z64_extra_lho(
 ) -> bool:
     """Find the ZIP64 Extra Field (tag 0x0001) in ``data[extra_start:]`` and
     add ``offset`` to the local-header offset stored there in-place.
+
+    ``data`` is any writable buffer (``bytearray`` or ``mmap.mmap``).
 
     Returns ``True`` if the field was found and patched, ``False`` otherwise.
     """
