@@ -2,6 +2,7 @@ import { useState } from 'react'
 import axios from 'axios'
 import './ExtractFile.css'
 import API_URL from '../config/api'
+import { getApiErrorMessage } from '../utils/apiError'
 
 function ExtractFile() {
   const [image, setImage] = useState(null)
@@ -77,7 +78,9 @@ function ExtractFile() {
       setPassword('')
       document.getElementById('extract-image-input').value = ''
     } catch (err) {
-      setError(err.response?.data?.error || 'An error occurred while extracting the file')
+      // responseType is 'blob', so the error body is a Blob that must be
+      // parsed to recover the server's message (e.g. "Incorrect password.")
+      setError(await getApiErrorMessage(err, 'An error occurred while extracting the file'))
     } finally {
       setLoading(false)
     }

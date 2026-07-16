@@ -3,6 +3,7 @@ import axios from 'axios'
 import './Polyglot.css'
 import API_URL from '../config/api'
 import CapacityIndicator from './CapacityIndicator'
+import { getApiErrorMessage } from '../utils/apiError'
 
 function Polyglot() {
   const [mode, setMode] = useState('create') // 'create' or 'extract'
@@ -140,7 +141,9 @@ function Polyglot() {
       setExtractSuccess('✅ File extracted and downloaded successfully!')
       setTimeout(() => setExtractSuccess(''), 4000)
     } catch (err) {
-      setError(err.response?.data?.error || 'An error occurred while extracting the file')
+      // responseType is 'blob', so the error body is a Blob that must be
+      // parsed to recover the server's message (e.g. "Incorrect password")
+      setError(await getApiErrorMessage(err, 'An error occurred while extracting the file'))
     } finally {
       setLoading(false)
     }
