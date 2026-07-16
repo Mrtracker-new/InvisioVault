@@ -50,6 +50,23 @@ SAFE_ERROR_MESSAGES = {
 MIN_PASSWORD_LENGTH = 8
 
 
+def _remove_quietly(*paths):
+    """Best-effort removal of temporary files.
+
+    ``None`` entries and already-missing files are ignored, so callers can
+    pass path variables that may never have been assigned (initialised to
+    ``None``) or that were already cleaned up.  Used from ``finally`` blocks
+    to guarantee uploaded temp files are deleted even when the operation
+    raises (prevents disk-exhaustion via deliberately failing requests).
+    """
+    for p in paths:
+        if p:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
 def sanitize_error(error_message: str, is_debug: bool = False) -> str:
     """Sanitize error messages to avoid leaking internal details in production.
     
@@ -170,6 +187,8 @@ def hide_file():
     plus disk I/O for large files.  10/hour per IP throttles brute-force
     capacity probing and resource exhaustion while leaving normal use unaffected.
     """
+    image_path = None
+    file_path = None
     try:
         # Validate request
         image = request.files.get('image')
@@ -216,10 +235,6 @@ def hide_file():
         output_path = os.path.join(upload_folder, output_filename)
         hide_file_in_image(image_path, file_path, output_path, password)
 
-        # Clean up input files
-        os.remove(image_path)
-        os.remove(file_path)
-
         logger.info(f"Successfully hid file in image: {output_filename}")
         return jsonify({
             'success': True,
@@ -235,6 +250,10 @@ def hide_file():
         logger.error(f"Error hiding file: {str(e)}")
         safe_error = sanitize_error('An error occurred while hiding the file', current_app.config['DEBUG'])
         return jsonify({'error': safe_error}), 500
+    finally:
+        # Always delete the uploaded inputs — including when hide_file_in_image
+        # raises (e.g. image too small), so failed requests can't leak temp files.
+        _remove_quietly(image_path, file_path)
 
 
 @api.route('/download/<download_id>', methods=['GET'])
@@ -278,6 +297,7 @@ def extract_file():
     10/hour limit also mitigates password brute-forcing via repeated extraction
     attempts with different passwords.
     """
+    image_path = None
     try:
         # Validate request
         image = request.files.get('image')
@@ -302,9 +322,6 @@ def extract_file():
         # Extract file
         file_data, original_filename, mime_type = extract_file_from_image(image_path, password)
 
-        # Clean up
-        os.remove(image_path)
-
         # Send extracted file
         output = BytesIO(file_data)
         output.seek(0)
@@ -328,6 +345,11 @@ def extract_file():
         logger.error(f"Error extracting file: {str(e)}")
         safe_error = sanitize_error('An error occurred while extracting the file', current_app.config['DEBUG'])
         return jsonify({'error': safe_error}), 500
+    finally:
+        # Always delete the uploaded stego image — including when extraction
+        # fails (wrong password, corrupt data), so failed requests can't leak
+        # temp files.
+        _remove_quietly(image_path)
 
 
 @api.route('/polyglot/create', methods=['POST'])
@@ -338,6 +360,8 @@ def create_polyglot_file():
     Heavy endpoint: ZIP construction, large file I/O, and optional AES-GCM
     encryption.  Equivalent cost to /hide — same 10/hour limit.
     """
+    carrier_path = None
+    file_path = None
     try:
         # Validate request
         carrier_file = request.files.get('carrier')
@@ -371,10 +395,6 @@ def create_polyglot_file():
         
         create_polyglot(carrier_path, file_path, output_path, password)
 
-        # Clean up input files
-        os.remove(carrier_path)
-        os.remove(file_path)
-
         logger.info(f"Successfully created polyglot file: {output_filename}")
         return jsonify({
             'success': True,
@@ -390,6 +410,10 @@ def create_polyglot_file():
         logger.error(f"Error creating polyglot: {str(e)}")
         safe_error = sanitize_error('An error occurred while creating the polyglot file', current_app.config['DEBUG'])
         return jsonify({'error': safe_error}), 500
+    finally:
+        # Always delete the uploaded inputs — including when create_polyglot
+        # raises, so failed requests can't leak temp files.
+        _remove_quietly(carrier_path, file_path)
 
 
 @api.route('/polyglot/download/<download_id>', methods=['GET'])
@@ -430,6 +454,7 @@ def extract_from_polyglot_file():
     Heavy endpoint: ZIP parse, optional AES-GCM decryption.  Same cost and
     password-oracle risk as /extract — same 10/hour limit.
     """
+    polyglot_path = None
     try:
         # Validate request
         polyglot_file = request.files.get('file')
@@ -448,9 +473,6 @@ def extract_from_polyglot_file():
 
         # Extract file
         file_data, original_filename = extract_from_polyglot(polyglot_path, password)
-
-        # Clean up
-        os.remove(polyglot_path)
 
         # Send extracted file
         output = BytesIO(file_data)
@@ -474,6 +496,11 @@ def extract_from_polyglot_file():
         logger.error(f"Error extracting from polyglot: {str(e)}")
         safe_error = sanitize_error('An error occurred while extracting the file', current_app.config['DEBUG'])
         return jsonify({'error': safe_error}), 500
+    finally:
+        # Always delete the uploaded polyglot — including when extraction
+        # fails (wrong password, no hidden data), so failed requests can't
+        # leak temp files.
+        _remove_quietly(polyglot_path)
 
 
 @api.route('/qr/generate', methods=['POST'])
@@ -485,6 +512,7 @@ def generate_qr_code():
     optional logo compositing.  20/hour allows reasonable user activity
     while preventing bulk QR generation abuse.
     """
+    logo_path = None
     try:
         # Validate request
         public_data = request.form.get('public_data', '').strip()
@@ -516,11 +544,10 @@ def generate_qr_code():
         
         # Handle optional logo
         logo_file = request.files.get('logo')
-        logo_path = None
-        
+
         upload_folder = current_app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
-        
+
         if logo_file:
             try:
                 validate_image(logo_file)
@@ -530,34 +557,29 @@ def generate_qr_code():
             except ValueError:
                 # If logo validation fails, continue without logo
                 logo_path = None
-        
+
         # Generate QR code with steganography
         output_filename = f"{secrets.token_urlsafe(16)}_qr.png"
         output_path = os.path.join(upload_folder, output_filename)
-        
-        try:
-            generate_qr_with_stego(
-                public_data=public_data,
-                secret_text=secret_text,
-                output_path=output_path,
-                password=password,
-                fg_color=fg_color,
-                bg_color=bg_color,
-                scale=scale,
-                logo_path=logo_path
-            )
-            
-            logger.info(f"Successfully generated QR code: {output_filename}")
-            return jsonify({
-                'success': True,
-                'message': 'QR code generated successfully',
-                'download_id': output_filename
-            }), 200
-        finally:
-            # Clean up logo file if it was uploaded
-            if logo_path and os.path.exists(logo_path):
-                os.remove(logo_path)
-    
+
+        generate_qr_with_stego(
+            public_data=public_data,
+            secret_text=secret_text,
+            output_path=output_path,
+            password=password,
+            fg_color=fg_color,
+            bg_color=bg_color,
+            scale=scale,
+            logo_path=logo_path
+        )
+
+        logger.info(f"Successfully generated QR code: {output_filename}")
+        return jsonify({
+            'success': True,
+            'message': 'QR code generated successfully',
+            'download_id': output_filename
+        }), 200
+
     except ValueError as e:
         logger.error(f"QR generation error: {str(e)}")
         safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
@@ -566,6 +588,10 @@ def generate_qr_code():
         logger.error(f"Error generating QR code: {str(e)}")
         safe_error = sanitize_error('An error occurred while generating the QR code', current_app.config['DEBUG'])
         return jsonify({'error': safe_error}), 500
+    finally:
+        # Always delete the uploaded logo — including when scale parsing or
+        # QR generation raises, so failed requests can't leak temp files.
+        _remove_quietly(logo_path)
 
 
 @api.route('/qr/download/<download_id>', methods=['GET'])
