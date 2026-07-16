@@ -89,6 +89,8 @@ def create_polyglot(
     Raises:
         FileNotFoundError: If carrier or file-to-hide does not exist.
         ValueError:        If the ZIP structure cannot be patched.
+        RuntimeError:      If *password* is given but pyzipper is unavailable
+                           (we refuse to silently write an unencrypted zip).
         OSError:           On filesystem errors.
     """
     original_filename = os.path.basename(file_to_hide_path)
@@ -103,7 +105,19 @@ def create_polyglot(
         # ------------------------------------------------------------------ #
         # 1. Create the ZIP archive (hidden payload)                          #
         # ------------------------------------------------------------------ #
-        if password and HAS_PYZIPPER:
+        if password:
+            # Fail closed: never silently fall back to an UNENCRYPTED zip
+            # when the user asked for password protection.  pyzipper is a
+            # pinned dependency (requirements.txt), so reaching this branch
+            # without it means a broken deployment — surface that instead of
+            # writing the user's data in plaintext.
+            if not HAS_PYZIPPER:
+                raise RuntimeError(
+                    "Password-protected polyglot files require the 'pyzipper' "
+                    "package, which is not available in this deployment. "
+                    "Refusing to silently create an unencrypted archive - "
+                    "please contact the administrator."
+                )
             with pyzipper.AESZipFile(
                 tmp_zip_path, "w",
                 compression=pyzipper.ZIP_DEFLATED,
