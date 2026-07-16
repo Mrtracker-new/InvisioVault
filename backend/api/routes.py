@@ -21,7 +21,7 @@ from extensions import limiter
 
 from utils.steganography import hide_file_in_image, extract_file_from_image
 from utils.polyglot import create_polyglot, extract_from_polyglot
-from utils.validators import validate_image, validate_hideable_file
+from utils.validators import validate_image, validate_hideable_file, MAX_STEGO_IMAGE_SIZE
 from utils.qr_stego import (
     generate_qr_with_stego,
     extract_from_qr_stego,
@@ -286,7 +286,10 @@ def extract_file():
         if not image:
             return jsonify({'error': 'Image file is required'}), 400
 
-        validate_image(image)
+        # Stego images are app-generated lossless PNGs and routinely exceed
+        # the 10 MB carrier-upload cap (a 2 MB JPEG carrier yields a 12+ MB
+        # stego PNG), so extraction uses the larger MAX_STEGO_IMAGE_SIZE cap.
+        validate_image(image, max_size=MAX_STEGO_IMAGE_SIZE)
 
         # Save image temporarily
         upload_folder = current_app.config['UPLOAD_FOLDER']

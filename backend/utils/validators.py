@@ -30,8 +30,16 @@ MAX_PIXEL_COUNT = 100_000_000  # 100 megapixels
 Image.MAX_IMAGE_PIXELS = MAX_PIXEL_COUNT
 
 # ── File size limits (bytes) ─────────────────────────────────────────────────
-MAX_IMAGE_SIZE = 10 * 1024 * 1024       # 10 MB — carrier images
+MAX_IMAGE_SIZE = 10 * 1024 * 1024       # 10 MB — carrier images (hide input)
 MAX_HIDEABLE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB — files to hide
+
+# Stego images submitted for EXTRACTION are app-generated lossless PNGs of
+# the carrier's raw RGB pixels, so they are routinely larger than the carrier
+# that was uploaded (a 2 MB JPEG carrier can produce a 12+ MB stego PNG).
+# Capping extraction at MAX_IMAGE_SIZE would reject the app's own output.
+# The real DoS guards on this path are Flask's MAX_CONTENT_LENGTH (50 MB)
+# and the global pixel-count cap above, so we align with the request limit.
+MAX_STEGO_IMAGE_SIZE = 50 * 1024 * 1024  # 50 MB — stego images (extract input)
 
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp'}
 ALLOWED_FILE_EXTENSIONS = {
@@ -111,7 +119,7 @@ def validate_file(
             pass
 
 
-def validate_image(file: FileStorage) -> None:
+def validate_image(file: FileStorage, max_size: int = MAX_IMAGE_SIZE) -> None:
     """Validate that *file* is a genuine, safe image.
 
     Performs four checks in order:
@@ -123,11 +131,18 @@ def validate_image(file: FileStorage) -> None:
          exceed ``MAX_PIXEL_COUNT`` (set globally via
          ``Image.MAX_IMAGE_PIXELS``).
 
+    Args:
+        file:     The uploaded image.
+        max_size: Byte-size cap.  Defaults to ``MAX_IMAGE_SIZE`` (carrier
+                  uploads); pass ``MAX_STEGO_IMAGE_SIZE`` for extraction
+                  inputs, which are app-generated lossless PNGs and thus
+                  legitimately larger than any carrier we accept.
+
     Raises:
         ValueError: If any check fails.
     """
     # ── 1. Extension + size ──────────────────────────────────────────────
-    validate_file(file, ALLOWED_IMAGE_EXTENSIONS, MAX_IMAGE_SIZE)
+    validate_file(file, ALLOWED_IMAGE_EXTENSIONS, max_size)
 
     extension = file.filename.rsplit('.', 1)[1].lower()
 
