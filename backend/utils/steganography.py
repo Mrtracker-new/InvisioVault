@@ -78,6 +78,16 @@ _MAX_METADATA_ENC_LEN: int = 1_024
 # materialise from a single image.  100 MB.
 _MAX_PAYLOAD_BYTES: int = 100 * 1_024 * 1_024
 
+# Hard cap on *decompressed* output.  zlib's worst-case expansion is ~1032:1,
+# so a _MAX_PAYLOAD_BYTES-sized payload could otherwise inflate to ~100 GB
+# (decompression bomb, CWE-409).  Legitimate hidden files can never exceed the
+# upload limit (Flask MAX_CONTENT_LENGTH, 50 MB), so 100 MB is generous.
+_MAX_DECOMPRESSED_BYTES: int = 100 * 1_024 * 1_024
+
+# Output-window granularity for the streaming decompressor in
+# _safe_decompress().  64 KiB keeps peak overshoot past the cap negligible.
+_DECOMPRESS_CHUNK: int = 65_536
+
 # Sanity assertion: our caps must fit inside the v2 4-byte field.
 # This fires at module-import time if someone accidentally reduces the field
 # width back to 2 bytes without adjusting the caps.
@@ -163,6 +173,62 @@ def _encode_metadata_length(n: int) -> bytes:
     # to_bytes() call is guaranteed to succeed — the assertion above is the
     # true safety net; the to_bytes() width is just headroom.
     return n.to_bytes(_V2_META_LEN_BYTES, "big")
+
+
+def _safe_decompress(data: bytes, max_size: int = _MAX_DECOMPRESSED_BYTES) -> bytes:
+    """Decompress *data* with a hard output-size cap (CWE-409 defence).
+
+    A plain ``zlib.decompress()`` call places no bound on the output, so a
+    small crafted payload (zlib expands up to ~1032:1) can inflate to many
+    gigabytes and OOM the process.  This helper feeds the stream through a
+    ``decompressobj`` with ``max_length`` windows and aborts as soon as the
+    output would exceed *max_size*, keeping peak memory bounded.
+
+    Args:
+        data:     raw zlib stream
+        max_size: maximum decompressed bytes to materialise
+
+    Returns:
+        The fully decompressed bytes.
+
+    Raises:
+        ValueError: if the decompressed output would exceed *max_size*.
+        zlib.error: if *data* is not a valid zlib stream (propagated to the
+                    caller's generic error handler).
+    """
+    decompressor = zlib.decompressobj()
+    chunks: list[bytes] = []
+    total = 0
+
+    while data:
+        chunk = decompressor.decompress(data, _DECOMPRESS_CHUNK)
+        total += len(chunk)
+        if total > max_size:
+            raise ValueError(
+                f"Decompressed data exceeds the maximum allowed size "
+                f"({max_size // (1024 * 1024)} MB). "
+                "The file may be corrupted or malicious."
+            )
+        chunks.append(chunk)
+        if decompressor.eof:
+            break
+        # Input not yet consumed (because the output window filled) comes back
+        # via unconsumed_tail and must be re-fed on the next iteration.
+        data = decompressor.unconsumed_tail
+        if not data and not chunk:
+            # No input left, no output produced, no EOF: truncated stream.
+            break
+
+    tail = decompressor.flush()
+    total += len(tail)
+    if total > max_size:
+        raise ValueError(
+            f"Decompressed data exceeds the maximum allowed size "
+            f"({max_size // (1024 * 1024)} MB). "
+            "The file may be corrupted or malicious."
+        )
+    chunks.append(tail)
+    return b"".join(chunks)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -404,7 +470,9 @@ def extract_file_from_image(
         original_filename, mime_type = metadata.split("|", 1)
 
         # ── Decompress ────────────────────────────────────────────────────────
-        decompressed_data = zlib.decompress(payload_bytes)
+        # _safe_decompress caps the output size — a plain zlib.decompress()
+        # here would let a small crafted payload inflate to gigabytes (CWE-409).
+        decompressed_data = _safe_decompress(payload_bytes)
 
         return decompressed_data, original_filename, mime_type
 
