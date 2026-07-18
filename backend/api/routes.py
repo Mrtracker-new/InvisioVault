@@ -147,8 +147,8 @@ def calculate_capacity():
         
         try:
             # Open image and calculate capacity.
-            # Use img.width * img.height instead of len(list(img.getdata()))
-            # to avoid materialising the entire pixel list just for a count.
+            # Use img.width * img.height instead of materialising the pixel
+            # data just for a count — O(1) vs O(pixels).
             img = Image.open(image_path).convert("RGB")
             total_pixels = img.width * img.height
 

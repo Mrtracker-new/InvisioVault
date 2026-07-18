@@ -125,27 +125,31 @@ def _iter_lsb_bytes(img: Image.Image):
     """Yield each LSB byte extracted from the RGB channels without ever
     materialising the entire pixel list in Python memory.
 
-    Pillow's ``ImagingCore`` object (returned by ``img.getdata()``) supports
-    direct integer indexing, so we can walk it sequentially without converting
-    it to a Python list.  Peak additional memory is O(1) — just one pixel
-    tuple per iteration step.
+    Pillow's ``PixelAccess`` object (returned by ``img.load()``) supports
+    direct ``px[x, y]`` indexing against the C-backed pixel buffer, so we can
+    walk the image one pixel at a time without converting it to a Python list.
+    Peak additional memory is O(1) — just one pixel tuple per iteration step.
+    (``img.getdata()`` was deprecated in Pillow 12 for removal in Pillow 14;
+    ``get_flattened_data()`` is not a substitute here because it materialises
+    the whole image as a tuple, defeating the streaming design.)
 
     Yields:
         int: the next reconstructed byte (0–255) from the image's LSBs.
     """
-    data = img.getdata()           # ImagingCore — C-backed, NOT a Python list
-    total = img.width * img.height # pixel count — zero allocation
+    px = img.load()                # PixelAccess — C-backed, lazy per-pixel read
+    width, height = img.width, img.height
     byte = 0
     bit_count = 0
-    for idx in range(total):
-        pixel = data[idx]
-        for ch in pixel[:3]:      # R, G, B only
-            byte = (byte << 1) | (ch & 1)
-            bit_count += 1
-            if bit_count == 8:
-                yield byte
-                byte = 0
-                bit_count = 0
+    for y in range(height):
+        for x in range(width):
+            pixel = px[x, y]
+            for ch in pixel[:3]:  # R, G, B only
+                byte = (byte << 1) | (ch & 1)
+                bit_count += 1
+                if bit_count == 8:
+                    yield byte
+                    byte = 0
+                    bit_count = 0
 
 
 def _read_exactly(gen, n: int, context: str = "data") -> bytes:
@@ -290,7 +294,10 @@ def hide_file_in_image(
             "Host image dimensions exceed the maximum supported size."
         )
 
-    host_pixels = list(host_img.getdata())  # required for putdata() write-back
+    # get_flattened_data() replaces the deprecated getdata() (removed in
+    # Pillow 14).  It returns a tuple of pixel tuples; we need a mutable list
+    # for the in-place LSB edits before putdata() writes them back.
+    host_pixels = list(host_img.get_flattened_data())
 
     # ── 1. Read the file; compress only when not encrypting ──────────────────
     # Compressing plaintext BEFORE encryption leaks information about the
