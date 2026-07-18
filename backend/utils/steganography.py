@@ -335,6 +335,17 @@ def hide_file_in_image(
         # other without the key.
         metadata_field = fernet.encrypt(metadata_plain)   # ciphertext
         payload_field  = fernet.encrypt(compressed_data)  # ciphertext
+
+        # Memory hygiene (CWE-244): drop key material references as soon as
+        # encryption is done.  Full zeroization is impossible for immutable
+        # bytes — see utils/crypto_utils.py module docstring.
+        key = fernet = None
+
+        # Memory hygiene (CWE-244): drop key material references as soon as
+        # encryption is done so they don't live until the end of the request.
+        # Full zeroization is impossible for immutable bytes — see the
+        # limitation note in utils/crypto_utils.py.
+        del key, fernet
     else:
         # No password: store plaintext metadata and unencrypted payload.
         metadata_field = metadata_plain
@@ -450,6 +461,11 @@ def extract_file_from_image(
                 payload_bytes  = fernet.decrypt(payload_bytes)
             except Exception:
                 raise ValueError("Incorrect password.")
+            finally:
+                # Memory hygiene (CWE-244): drop key material references as
+                # soon as decryption is done (or fails).  Full zeroization is
+                # impossible for immutable bytes — see utils/crypto_utils.py.
+                key = fernet = None
         else:
             metadata_plain = metadata_bytes
 

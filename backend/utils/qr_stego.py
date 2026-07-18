@@ -79,6 +79,10 @@ def _encrypt_secret(secret_text: str, password: str) -> bytes:
     key = derive_fernet_key(password, salt)
     fernet = Fernet(key)
     token = fernet.encrypt(secret_text.encode("utf-8"))
+    # Memory hygiene (CWE-244): drop key material references immediately.
+    # Full zeroization is impossible for immutable bytes — see
+    # utils/crypto_utils.py module docstring.
+    key = fernet = None
     return bytes([FLAG_FERNET]) + salt + token
 
 
@@ -115,6 +119,11 @@ def _decrypt_secret(payload_body: bytes, password: str) -> str:
         # We intentionally surface a single, non-differentiating error to
         # prevent oracle-style probing of which condition triggered.
         raise ValueError("Incorrect password or the QR code data has been tampered with.")
+    finally:
+        # Memory hygiene (CWE-244): drop key material references immediately.
+        # Full zeroization is impossible for immutable bytes — see
+        # utils/crypto_utils.py module docstring.
+        key = fernet = None
 
     return plaintext.decode("utf-8")
 
