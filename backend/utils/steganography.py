@@ -5,8 +5,9 @@ Wire format — v1 (legacy, still supported for extraction)
 Without password:
     [password_flag(1)=0x00] [metadata_length(2, BE)] [metadata: "filename|mime"(N)] [data_length(4, BE)] [compressed_data(M)]
 
-With password:
+With password (compressed-then-encrypted — OLD, still readable):
     [password_flag(1)=0x01] [salt(16)] [metadata_length(2, BE)] [enc_metadata(N)] [data_length(4, BE)] [enc_payload(M)]
+    enc_payload = Fernet(key).encrypt( zlib.compress(plaintext) )
 
 Wire format — v2 (current writer, introduced to fix M-06)
 ---------------------------------------------------------
@@ -16,14 +17,25 @@ unambiguous because v1 password_flag is only ever 0x00 or 0x01.
 Without password:
     [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x00] [metadata_length(4, BE)] [metadata: "filename|mime"(N)] [data_length(4, BE)] [compressed_data(M)]
 
-With password:
+With password — flag 0x01 (compressed-then-encrypted, OLD, still readable):
     [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x01] [salt(16)] [metadata_length(4, BE)] [enc_metadata(N)] [data_length(4, BE)] [enc_payload(M)]
+    enc_payload = Fernet(key).encrypt( zlib.compress(plaintext) )
+
+With password — flag 0x03 (encrypt-only, CURRENT writer):
+    [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x03] [salt(16)] [metadata_length(4, BE)] [enc_metadata(N)] [data_length(4, BE)] [enc_payload(M)]
+    enc_payload = Fernet(key).encrypt( plaintext )   ← NO compression
 
 Migration notes
 ---------------
 * All NEW embeds are written in v2 format.
-* Extraction transparently handles both v1 and v2 blobs, so previously
-  embedded images continue to work without any re-encoding.
+* Extraction transparently handles v1, v2/0x01 (old encrypted), and v2/0x03
+  (new encrypted) blobs, so previously embedded images continue to work.
+* flag 0x00 (plain) always stores compressed data.
+* flag 0x01 (old encrypted) stores compress-then-encrypt; the extractor
+  decompresses after decrypting.
+* flag 0x03 (current encrypted) stores encrypt-only; Fernet ciphertext is
+  pseudo-random and cannot be meaningfully compressed, so skipping
+  compression closes the CRIME/BREACH compression-oracle attack vector.
 * The upgrade from 2-byte to 4-byte metadata_length closes the OverflowError
   DoS vector (M-06) and future-proofs the field (max 4 GiB vs 64 KiB).
 
@@ -54,6 +66,11 @@ from utils.crypto_utils import derive_fernet_key
 # 0xFF is never a valid v1 password_flag (only 0x00 / 0x01 are), so this is an
 # unambiguous discriminator that requires zero guessing on the read side.
 _V2_MAGIC: bytes = b"\xff\x02"
+
+# Password-flag byte values
+_FLAG_PLAIN:          int = 0x00  # v1/v2 plain: metadata+payload compressed, no encryption
+_FLAG_ENC_COMPRESSED: int = 0x01  # v1/v2 old: compress-then-encrypt (legacy; still readable)
+_FLAG_ENC_ONLY:       int = 0x03  # v2 current: encrypt-only (no compression → closes CRIME/BREACH)
 
 # Byte widths of the length fields.
 _V1_META_LEN_BYTES: int = 2   # legacy: 2-byte metadata_length   → max 65 535 B
@@ -275,10 +292,21 @@ def hide_file_in_image(
 
     host_pixels = list(host_img.getdata())  # required for putdata() write-back
 
-    # ── 1. Read and compress the file ────────────────────────────────────────
+    # ── 1. Read the file; compress only when not encrypting ──────────────────
+    # Compressing plaintext BEFORE encryption leaks information about the
+    # plaintext through the ciphertext length — the CRIME/BREACH family of
+    # attacks.  Fernet ciphertext is pseudo-random and compresses ~0%, so
+    # skipping compression for encrypted payloads has no space cost and
+    # eliminates the oracle entirely.
     with open(file_path, "rb") as f:
         file_data = f.read()
-    compressed_data = zlib.compress(file_data, level=9)
+
+    if password:
+        # Encrypt-only path: no compression (closed CRIME/BREACH oracle)
+        payload_bytes_plain = file_data
+    else:
+        # Plain path: compress as before
+        payload_bytes_plain = zlib.compress(file_data, level=9)
 
     # ── 2. Build metadata string ──────────────────────────────────────────────
     original_filename = os.path.basename(file_path)
@@ -321,7 +349,11 @@ def hide_file_in_image(
         )
 
     # ── 4. Encrypt or pass-through depending on password ─────────────────────
-    password_flag = b"\x01" if password else b"\x00"
+    # flag 0x03 = encrypt-only (no prior compression) — current writer.
+    # flag 0x00 = plain (compressed, unencrypted).
+    # flag 0x01 = old compress-then-encrypt — only ever written by legacy code;
+    #             kept readable by the extractor for backward compatibility.
+    password_flag = bytes([_FLAG_ENC_ONLY]) if password else bytes([_FLAG_PLAIN])
     salt = b""
 
     if password:
@@ -333,23 +365,18 @@ def hide_file_in_image(
         # Fernet tokens.  Each token carries its own IV and HMAC so they are
         # cryptographically independent — knowing one does not help decrypt the
         # other without the key.
-        metadata_field = fernet.encrypt(metadata_plain)   # ciphertext
-        payload_field  = fernet.encrypt(compressed_data)  # ciphertext
+        # payload_bytes_plain is NOT compressed (no compression-oracle risk).
+        metadata_field = fernet.encrypt(metadata_plain)        # ciphertext
+        payload_field  = fernet.encrypt(payload_bytes_plain)   # ciphertext
 
         # Memory hygiene (CWE-244): drop key material references as soon as
         # encryption is done.  Full zeroization is impossible for immutable
         # bytes — see utils/crypto_utils.py module docstring.
         key = fernet = None
-
-        # Memory hygiene (CWE-244): drop key material references as soon as
-        # encryption is done so they don't live until the end of the request.
-        # Full zeroization is impossible for immutable bytes — see the
-        # limitation note in utils/crypto_utils.py.
-        del key, fernet
     else:
-        # No password: store plaintext metadata and unencrypted payload.
+        # No password: store plaintext metadata and zlib-compressed payload.
         metadata_field = metadata_plain
-        payload_field  = compressed_data
+        payload_field  = payload_bytes_plain   # already compressed above
 
     # ── 5. Encode lengths (v2: 4-byte metadata_length) ───────────────────────
     # _encode_metadata_length() performs an explicit cap check *before*
@@ -434,7 +461,7 @@ def extract_file_from_image(
 
         if first_two == _V2_MAGIC:
             # ── V2 parser ────────────────────────────────────────────────────
-            metadata_bytes, payload_bytes, has_password, salt = _parse_v2(
+            metadata_bytes, payload_bytes, has_password, salt, is_compressed = _parse_v2(
                 gen, max_carriable, password
             )
         else:
@@ -442,7 +469,7 @@ def extract_file_from_image(
             # first_two[0] is the password_flag byte.
             # first_two[1] is the first byte of salt (if encrypted) or the
             # first byte of the 2-byte metadata_length (if plain).
-            metadata_bytes, payload_bytes, has_password, salt = _parse_v1(
+            metadata_bytes, payload_bytes, has_password, salt, is_compressed = _parse_v1(
                 gen, first_two, max_carriable, password
             )
 
@@ -485,12 +512,18 @@ def extract_file_from_image(
             )
         original_filename, mime_type = metadata.split("|", 1)
 
-        # ── Decompress ────────────────────────────────────────────────────────
-        # _safe_decompress caps the output size — a plain zlib.decompress()
-        # here would let a small crafted payload inflate to gigabytes (CWE-409).
-        decompressed_data = _safe_decompress(payload_bytes)
+        # ── Decompress (only if the payload was stored compressed) ────────────
+        # flag 0x00 (plain) and 0x01 (old compress-then-encrypt) store
+        # compressed data; flag 0x03 (current encrypt-only) does not, so the
+        # decompression step is skipped for it.  _safe_decompress caps the
+        # output size — a plain zlib.decompress() would let a small crafted
+        # payload inflate to gigabytes (CWE-409).
+        if is_compressed:
+            file_data = _safe_decompress(payload_bytes)
+        else:
+            file_data = payload_bytes
 
-        return decompressed_data, original_filename, mime_type
+        return file_data, original_filename, mime_type
 
     except ValueError:
         raise
@@ -504,15 +537,19 @@ def _parse_v2(
     gen,
     max_carriable: int,
     password: str | None,
-) -> tuple[bytes, bytes, bool, bytes]:
+) -> tuple[bytes, bytes, bool, bytes, bool]:
     """Parse a v2 blob from *gen* (magic already consumed by caller).
 
     Returns:
-        (metadata_bytes, payload_bytes, has_password, salt)
+        (metadata_bytes, payload_bytes, has_password, salt, is_compressed)
     """
     # ── Password flag (1 byte) ────────────────────────────────────────────────
     password_flag_byte = _read_exactly(gen, 1, "password flag")[0]
-    has_password = password_flag_byte == 0x01
+
+    has_password  = password_flag_byte in (_FLAG_ENC_COMPRESSED, _FLAG_ENC_ONLY)
+    # payload was zlib-compressed for plain (0x00) and old encrypted (0x01);
+    # new encrypted payloads (0x03) are stored uncompressed.
+    is_compressed = password_flag_byte in (_FLAG_PLAIN, _FLAG_ENC_COMPRESSED)
 
     if has_password and not password:
         raise ValueError("This file is password-protected. Please provide the password.")
@@ -553,7 +590,7 @@ def _parse_v2(
     # ── Payload ───────────────────────────────────────────────────────────────
     payload_bytes = _read_exactly(gen, data_length, "payload")
 
-    return metadata_bytes, payload_bytes, has_password, salt
+    return metadata_bytes, payload_bytes, has_password, salt, is_compressed
 
 
 def _parse_v1(
@@ -561,7 +598,7 @@ def _parse_v1(
     first_two: bytes,
     max_carriable: int,
     password: str | None,
-) -> tuple[bytes, bytes, bool, bytes]:
+) -> tuple[bytes, bytes, bool, bytes, bool]:
     """Parse a legacy v1 blob.
 
     *first_two* contains the two bytes already consumed by the version sniffer:
@@ -569,8 +606,11 @@ def _parse_v1(
     byte of the 15 remaining salt bytes (encrypted) or the first byte of the
     2-byte metadata_length (plain).
 
+    v1 payloads are ALWAYS zlib-compressed (flag 0x00 = compressed-plain,
+    flag 0x01 = compress-then-encrypt), so ``is_compressed`` is always True.
+
     Returns:
-        (metadata_bytes, payload_bytes, has_password, salt)
+        (metadata_bytes, payload_bytes, has_password, salt, is_compressed)
     """
     password_flag_byte = first_two[0]
     has_password = password_flag_byte == 0x01
@@ -624,4 +664,5 @@ def _parse_v1(
     # ── Payload ───────────────────────────────────────────────────────────────
     payload_bytes = _read_exactly(gen, data_length, "payload")
 
-    return metadata_bytes, payload_bytes, has_password, salt
+    # v1 always stores compressed data (both plain 0x00 and encrypted 0x01).
+    return metadata_bytes, payload_bytes, has_password, salt, True
