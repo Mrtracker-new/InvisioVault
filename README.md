@@ -23,7 +23,7 @@
 | 🔗 **Polyglot** | One file, two formats. Open it normally → image. Rename to `.zip` → hidden files appear. |
 | 📱 **QR Code** | Phone cameras see a URL. InvisioVault sees your hidden message. 😏 |
 
-All modes support **AES-256 encryption**. Passwords optional, paranoia encouraged.
+All modes support **authenticated encryption** (Fernet for stego/QR, AES-256 for polyglot ZIPs). Passwords optional, paranoia encouraged.
 
 ---
 
@@ -45,7 +45,7 @@ cd frontend && npm install && npm run dev
 
 ## 🔒 Security Stuff
 
-✅ File validation &nbsp;|&nbsp; ✅ AES-256 encryption &nbsp;|&nbsp; ✅ Rate limiting &nbsp;|&nbsp; ✅ Path traversal prevention &nbsp;|&nbsp; ✅ Auto cleanup
+✅ File validation &nbsp;|&nbsp; ✅ Authenticated encryption &nbsp;|&nbsp; ✅ Rate limiting &nbsp;|&nbsp; ✅ Path traversal prevention &nbsp;|&nbsp; ✅ Auto cleanup
 
 ---
 
