@@ -1,149 +1,162 @@
-"""Steganography utilities for hiding and extracting files in images.
+"""
+Steganography utilities for hiding and extracting files in images.
 
 Wire format — v1 (legacy, still supported for extraction)
 ---------------------------------------------------------
 Without password:
-    [password_flag(1)=0x00] [metadata_length(2, BE)] [metadata: "filename|mime"(N)] [data_length(4, BE)] [compressed_data(M)]
+    [password_flag(1)=0x00] [metadata_length(2, BE)] [metadata: "filename|mime"(N)]
+    [data_length(4, BE)] [compressed_data(M)]
 
-With password (compressed-then-encrypted — OLD, still readable):
-    [password_flag(1)=0x01] [salt(16)] [metadata_length(2, BE)] [enc_metadata(N)] [data_length(4, BE)] [enc_payload(M)]
+With password (compress-then-encrypt):
+    [password_flag(1)=0x01] [salt(16)] [metadata_length(2, BE)] [enc_metadata(N)]
+    [data_length(4, BE)] [enc_payload(M)]
     enc_payload = Fernet(key).encrypt( zlib.compress(plaintext) )
 
-Wire format — v2 (current writer, introduced to fix M-06)
----------------------------------------------------------
-A v2 blob always starts with the two-byte magic sequence 0xFF 0x02, which is
-unambiguous because v1 password_flag is only ever 0x00 or 0x01.
+Wire format — v2 (introduced to fix M-06)
+-----------------------------------------
+A v2 blob always starts with the two-byte magic sequence 0xFF 0x02.
 
-Without password:
-    [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x00] [metadata_length(4, BE)] [metadata: "filename|mime"(N)] [data_length(4, BE)] [compressed_data(M)]
+Without password (flag 0x00):
+    [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x00] [metadata_length(4, BE)]
+    [metadata: "filename|mime"(N)] [data_length(4, BE)] [compressed_data(M)]
 
-With password — flag 0x01 (compressed-then-encrypted, OLD, still readable):
-    [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x01] [salt(16)] [metadata_length(4, BE)] [enc_metadata(N)] [data_length(4, BE)] [enc_payload(M)]
-    enc_payload = Fernet(key).encrypt( zlib.compress(plaintext) )
+With password — flag 0x01 (compress-then-encrypt, OLD):
+    [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x01] [salt(16)] [metadata_length(4, BE)]
+    [enc_metadata(N)] [data_length(4, BE)] [enc_payload(M)]
 
-With password — flag 0x03 (encrypt-only, CURRENT writer):
-    [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x03] [salt(16)] [metadata_length(4, BE)] [enc_metadata(N)] [data_length(4, BE)] [enc_payload(M)]
+With password — flag 0x03 (encrypt-only):
+    [MAGIC(2)=0xFF 0x02] [password_flag(1)=0x03] [salt(16)] [metadata_length(4, BE)]
+    [enc_metadata(N)] [data_length(4, BE)] [enc_payload(M)]
     enc_payload = Fernet(key).encrypt( plaintext )   ← NO compression
 
-Migration notes
----------------
-* All NEW embeds are written in v2 format.
-* Extraction transparently handles v1, v2/0x01 (old encrypted), and v2/0x03
-  (new encrypted) blobs, so previously embedded images continue to work.
-* flag 0x00 (plain) always stores compressed data.
-* flag 0x01 (old encrypted) stores compress-then-encrypt; the extractor
-  decompresses after decrypting.
-* flag 0x03 (current encrypted) stores encrypt-only; Fernet ciphertext is
-  pseudo-random and cannot be meaningfully compressed, so skipping
-  compression closes the CRIME/BREACH compression-oracle attack vector.
-* The upgrade from 2-byte to 4-byte metadata_length closes the OverflowError
-  DoS vector (M-06) and future-proofs the field (max 4 GiB vs 64 KiB).
+Wire format — v3 (detection‑resistant, LSB‑matching, ECC, stored threshold)
+---------------------------------------------------------------------------
+Header (embedded sequentially):
+    [MAGIC(2)=0xFF 0x02] [password_flag(1)] [salt(16)] [metadata_length(4, BE)]
+    [metadata(N)] [data_length(4, BE)] [threshold(1)] [ … payload (randomised) … ]
 
-    enc_metadata  = Fernet(key).encrypt(b"filename|mime")
-    enc_payload   = Fernet(key).encrypt(compressed_data)
+New flags:
+    0x10  plain, compressed + ECC, adaptive embed with stored threshold
+    0x11  encrypt‑only, compressed + ECC, adaptive embed (current writer)
+    0x12  compress‑then‑encrypt, compressed + ECC, adaptive embed (future)
 
-Both metadata_length and data_length encode the length of the *ciphertext*
-(not plaintext) so that the reader can use them as exact byte-counts without
-knowing the password.
+Old v3 flags (0x04, 0x05, 0x06) are still extractable by recomputing the threshold.
+
+Payload processing order for new flags:
+    file → zlib compress → ECC encode → (encrypt if flag 0x11/0x12) → payload
+Extraction reverses:
+    payload → (decrypt) → ECC decode → zlib decompress → original file
+
+The adaptive threshold is stored in the header (1 byte) so extraction does not
+need to recompute the edge map — it simply reads the stored value and applies
+the same eligibility criterion.
+
+LSB matching (±1 random adjustment) reduces detectability.
+Pixel selection uses a CSPRNG‑based Feistel permutation keyed by the salt.
+
+Wire format — v4 (current writer: fast adaptive)
+------------------------------------------------
+Header layout is identical to v3 (embedded sequentially):
+    [MAGIC(2)=0xFF 0x02] [password_flag(1)] [salt(16)] [metadata_length(4, BE)]
+    [metadata(N)] [data_length(4, BE)] [threshold(1)] [ … payload (randomised) … ]
+
+Flags:
+    0x20  plain, compressed + ECC, fast adaptive
+    0x21  encrypt‑only, compressed + ECC, fast adaptive (current writer)
+
+Differences from v3 (flags 0x10/0x11/0x12):
+  * Payload positions come from a NumPy RandomState (MT19937) permutation of
+    the eligible channels, seeded from HMAC(salt).  The MT19937 stream is
+    frozen forever by NumPy (NEP 19), so it is stable across platforms and
+    versions.  The permutation carries no secrecy either way — the salt sits
+    in the public header — so nothing is lost versus the per‑position
+    HMAC‑Feistel walk it replaces, and embedding a 4 MP image drops from
+    ~10 minutes of pure‑Python HMAC calls to well under a second.
+  * Edge scores are computed on LSB‑zeroed pixel values and the payload is
+    embedded by LSB *replacement*.  Embedding therefore cannot change any
+    pixel's edge score, so extraction recomputes the exact same eligible set.
+    (v3 scored the full pixel values and embedded with ±1 LSB matching, which
+    could flip the eligibility of pixels near the threshold between embed and
+    extract and silently corrupt the payload.)
+  * v3 flags (0x10/0x11/0x12) and old random flags (0x04/0x05/0x06) remain
+    extractable via the legacy HMAC‑Feistel path.
 """
 from __future__ import annotations
 
-from PIL import Image
+from PIL import Image, PngImagePlugin
 import zlib
 import mimetypes
 import os
 import secrets
+import math
+import hashlib
+import hmac
+import struct
 from cryptography.fernet import Fernet
-import base64
 import itertools
+import numpy as np
 
 from utils.crypto_utils import derive_fernet_key
 
+# ── Optional ECC library (Reed‑Solomon) ──────────────────────────────────────
+try:
+    from reedsolo import RSCodec
+    _ECC_AVAILABLE = True
+except ImportError:
+    _ECC_AVAILABLE = False
 
 # ── Wire-format constants ──────────────────────────────────────────────────────
-
-# Magic header that distinguishes a v2 blob from a legacy v1 blob.
-# 0xFF is never a valid v1 password_flag (only 0x00 / 0x01 are), so this is an
-# unambiguous discriminator that requires zero guessing on the read side.
 _V2_MAGIC: bytes = b"\xff\x02"
 
 # Password-flag byte values
-_FLAG_PLAIN:          int = 0x00  # v1/v2 plain: metadata+payload compressed, no encryption
-_FLAG_ENC_COMPRESSED: int = 0x01  # v1/v2 old: compress-then-encrypt (legacy; still readable)
-_FLAG_ENC_ONLY:       int = 0x03  # v2 current: encrypt-only (no compression → closes CRIME/BREACH)
+_FLAG_PLAIN_SEQUENTIAL:          int = 0x00   # v1/v2 plain, sequential
+_FLAG_ENC_COMPRESSED_SEQUENTIAL: int = 0x01   # v1/v2 old encrypt+compress, sequential
+_FLAG_ENC_ONLY_SEQUENTIAL:       int = 0x03   # v2 encrypt-only, sequential
+_FLAG_PLAIN_RANDOM:              int = 0x04   # v3 plain, randomised (legacy, no stored threshold)
+_FLAG_ENC_ONLY_RANDOM:           int = 0x05   # v3 encrypted, randomised (legacy, no stored threshold)
+_FLAG_ENC_COMPRESSED_RANDOM:     int = 0x06   # v3 encrypted+compress, randomised (legacy)
 
-# Byte widths of the length fields.
-_V1_META_LEN_BYTES: int = 2   # legacy: 2-byte metadata_length   → max 65 535 B
-_V2_META_LEN_BYTES: int = 4   # current: 4-byte metadata_length  → max 4 GiB
-_DATA_LEN_BYTES:    int = 4   # payload length field (unchanged)
+# v3 adaptive flags with stored threshold and ECC after compression (legacy read-only)
+_FLAG_PLAIN_ADAPTIVE_NEW:        int = 0x10   # plain, compressed+ECC, adaptive
+_FLAG_ENC_ONLY_ADAPTIVE_NEW:     int = 0x11   # encrypt-only, compressed+ECC, adaptive
+_FLAG_ENC_COMPRESSED_ADAPTIVE_NEW: int = 0x12 # encrypt+compress, compressed+ECC, adaptive
 
+# v4 fast-adaptive flags: NumPy MT19937 permutation + LSB-replacement on
+# LSB-zeroed edge scores.  Header layout identical to v3.  These are the
+# flags the current writer produces.
+_FLAG_PLAIN_FAST:    int = 0x20   # plain, compressed+ECC, fast adaptive (current writer)
+_FLAG_ENC_ONLY_FAST: int = 0x21   # encrypt-only, compressed+ECC, fast adaptive (current writer)
+
+_V1_META_LEN_BYTES: int = 2
+_V2_META_LEN_BYTES: int = 4
+_DATA_LEN_BYTES:    int = 4
+_THRESHOLD_BYTES:   int = 1   # new header field
 
 # ── Safety caps ───────────────────────────────────────────────────────────────
-
-# Maximum metadata *plaintext* we will ever embed.  No legitimate filename +
-# MIME string should exceed this.  Enforced at write time before any length
-# serialisation so OverflowError can never reach to_bytes().
 _MAX_METADATA_PLAIN_LEN: int = 512
-
-# When a password is used the metadata field holds a Fernet ciphertext.
-# Fernet overhead: 1-byte version + 8-byte timestamp + 16-byte IV + 32-byte
-# HMAC = 57 bytes of overhead, then base64url-encoded in 4/3 ratio.
-# Upper bound: ceil((512 + 57) / 3) * 4 = 760 bytes.  We use 1024 for headroom.
-_MAX_METADATA_ENC_LEN: int = 1_024
-
-# Absolute hard cap on raw (compressed / encrypted) payload bytes we will ever
-# materialise from a single image.  100 MB.
-_MAX_PAYLOAD_BYTES: int = 100 * 1_024 * 1_024
-
-# Hard cap on *decompressed* output.  zlib's worst-case expansion is ~1032:1,
-# so a _MAX_PAYLOAD_BYTES-sized payload could otherwise inflate to ~100 GB
-# (decompression bomb, CWE-409).  Legitimate hidden files can never exceed the
-# upload limit (Flask MAX_CONTENT_LENGTH, 50 MB), so 100 MB is generous.
+_MAX_METADATA_ENC_LEN:   int = 1_024
+_MAX_PAYLOAD_BYTES:      int = 100 * 1_024 * 1_024
 _MAX_DECOMPRESSED_BYTES: int = 100 * 1_024 * 1_024
+_DECOMPRESS_CHUNK:       int = 65_536
 
-# Output-window granularity for the streaming decompressor in
-# _safe_decompress().  64 KiB keeps peak overshoot past the cap negligible.
-_DECOMPRESS_CHUNK: int = 65_536
+assert _MAX_METADATA_PLAIN_LEN <= 0xFFFF_FFFF
+assert _MAX_METADATA_ENC_LEN   <= 0xFFFF_FFFF
+assert _MAX_PAYLOAD_BYTES      <= 0xFFFF_FFFF
 
-# Sanity assertion: our caps must fit inside the v2 4-byte field.
-# This fires at module-import time if someone accidentally reduces the field
-# width back to 2 bytes without adjusting the caps.
-assert _MAX_METADATA_PLAIN_LEN <= 0xFFFF_FFFF, "metadata plain cap overflows 4-byte field"
-assert _MAX_METADATA_ENC_LEN   <= 0xFFFF_FFFF, "metadata enc cap overflows 4-byte field"
-assert _MAX_PAYLOAD_BYTES      <= 0xFFFF_FFFF, "payload cap overflows 4-byte field"
+_derive_key_from_password = derive_fernet_key
 
-
-# Key derivation is provided by the shared crypto_utils module.
-# ``derive_fernet_key(password, salt)`` is a drop-in replacement for the old
-# ``_derive_key_from_password`` — same algorithm, same output format.
-_derive_key_from_password = derive_fernet_key  # backwards-compat alias
-
-
-# ── Streaming LSB primitives ───────────────────────────────────────────────────
+# ── Streaming LSB primitives (sequential, for legacy extraction) ──────────────
 
 def _iter_lsb_bytes(img: Image.Image):
-    """Yield each LSB byte extracted from the RGB channels without ever
-    materialising the entire pixel list in Python memory.
-
-    Pillow's ``PixelAccess`` object (returned by ``img.load()``) supports
-    direct ``px[x, y]`` indexing against the C-backed pixel buffer, so we can
-    walk the image one pixel at a time without converting it to a Python list.
-    Peak additional memory is O(1) — just one pixel tuple per iteration step.
-    (``img.getdata()`` was deprecated in Pillow 12 for removal in Pillow 14;
-    ``get_flattened_data()`` is not a substitute here because it materialises
-    the whole image as a tuple, defeating the streaming design.)
-
-    Yields:
-        int: the next reconstructed byte (0–255) from the image's LSBs.
-    """
-    px = img.load()                # PixelAccess — C-backed, lazy per-pixel read
+    """Yield each LSB byte extracted from the RGB channels sequentially."""
+    px = img.load()
     width, height = img.width, img.height
     byte = 0
     bit_count = 0
     for y in range(height):
         for x in range(width):
             pixel = px[x, y]
-            for ch in pixel[:3]:  # R, G, B only
+            for ch in pixel[:3]:
                 byte = (byte << 1) | (ch & 1)
                 bit_count += 1
                 if bit_count == 8:
@@ -153,16 +166,6 @@ def _iter_lsb_bytes(img: Image.Image):
 
 
 def _read_exactly(gen, n: int, context: str = "data") -> bytes:
-    """Consume exactly *n* bytes from *gen*, raising ValueError on underflow.
-
-    Args:
-        gen: byte generator (e.g. from :func:`_iter_lsb_bytes`)
-        n:   number of bytes to read
-        context: human-readable label used in the error message
-
-    Returns:
-        bytes of length *n*
-    """
     buf = bytes(itertools.islice(gen, n))
     if len(buf) < n:
         raise ValueError(
@@ -175,81 +178,231 @@ def _read_exactly(gen, n: int, context: str = "data") -> bytes:
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
 def _encode_metadata_length(n: int) -> bytes:
-    """Serialise *n* as a 4-byte big-endian unsigned integer (v2 writer).
-
-    Raises:
-        ValueError: if *n* exceeds _MAX_METADATA_ENC_LEN (fail-fast defence
-                    against future cap-constant mismatches).
-        OverflowError: if *n* somehow exceeds 2**32-1 (Python will raise this
-                       natively; we document it for clarity).
-    """
-    # Explicit cap check: converts a future OverflowError 500 into a clear
-    # ValueError 400 with a developer-friendly message.
     if n > _MAX_METADATA_ENC_LEN:
         raise ValueError(
             f"Metadata field length ({n} B) exceeds the maximum allowed "
-            f"{_MAX_METADATA_ENC_LEN} B.  Reduce the filename length."
+            f"{_MAX_METADATA_ENC_LEN} B."
         )
-    # With _MAX_METADATA_ENC_LEN ≤ 0xFFFF_FFFF (asserted at module load), this
-    # to_bytes() call is guaranteed to succeed — the assertion above is the
-    # true safety net; the to_bytes() width is just headroom.
     return n.to_bytes(_V2_META_LEN_BYTES, "big")
 
 
 def _safe_decompress(data: bytes, max_size: int = _MAX_DECOMPRESSED_BYTES) -> bytes:
-    """Decompress *data* with a hard output-size cap (CWE-409 defence).
-
-    A plain ``zlib.decompress()`` call places no bound on the output, so a
-    small crafted payload (zlib expands up to ~1032:1) can inflate to many
-    gigabytes and OOM the process.  This helper feeds the stream through a
-    ``decompressobj`` with ``max_length`` windows and aborts as soon as the
-    output would exceed *max_size*, keeping peak memory bounded.
-
-    Args:
-        data:     raw zlib stream
-        max_size: maximum decompressed bytes to materialise
-
-    Returns:
-        The fully decompressed bytes.
-
-    Raises:
-        ValueError: if the decompressed output would exceed *max_size*.
-        zlib.error: if *data* is not a valid zlib stream (propagated to the
-                    caller's generic error handler).
-    """
     decompressor = zlib.decompressobj()
     chunks: list[bytes] = []
     total = 0
-
     while data:
         chunk = decompressor.decompress(data, _DECOMPRESS_CHUNK)
         total += len(chunk)
         if total > max_size:
-            raise ValueError(
-                f"Decompressed data exceeds the maximum allowed size "
-                f"({max_size // (1024 * 1024)} MB). "
-                "The file may be corrupted or malicious."
-            )
+            raise ValueError(f"Decompressed data exceeds maximum allowed size ({max_size // (1024*1024)} MB).")
         chunks.append(chunk)
         if decompressor.eof:
             break
-        # Input not yet consumed (because the output window filled) comes back
-        # via unconsumed_tail and must be re-fed on the next iteration.
         data = decompressor.unconsumed_tail
         if not data and not chunk:
-            # No input left, no output produced, no EOF: truncated stream.
             break
-
     tail = decompressor.flush()
     total += len(tail)
     if total > max_size:
-        raise ValueError(
-            f"Decompressed data exceeds the maximum allowed size "
-            f"({max_size // (1024 * 1024)} MB). "
-            "The file may be corrupted or malicious."
-        )
+        raise ValueError(f"Decompressed data exceeds maximum allowed size ({max_size // (1024*1024)} MB).")
     chunks.append(tail)
     return b"".join(chunks)
+
+
+# ── ECC wrapper (Reed‑Solomon, applied after compression) ─────────────────────
+
+def _ecc_encode(data: bytes) -> bytes:
+    if not _ECC_AVAILABLE or len(data) == 0:
+        return data
+    rs = RSCodec(32)  # 32 parity bytes per ~223-byte block
+    return rs.encode(data)
+
+
+def _ecc_decode(data: bytes) -> bytes:
+    if not _ECC_AVAILABLE or len(data) == 0:
+        return data
+    rs = RSCodec(32)
+    try:
+        decoded, *_ = rs.decode(data)
+        return decoded
+    except Exception:
+        raise ValueError("ECC decoding failed — too many errors or corrupted data.")
+
+
+# ── Fast edge detection (Sobel on luminance) ──────────────────────────────────
+
+def _luminance(r: int, g: int, b: int) -> int:
+    """Return integer luminance 0‑255 from RGB channels."""
+    return int(0.299 * r + 0.587 * g + 0.114 * b)
+
+
+def _compute_edge_scores(px, width: int, height: int) -> bytearray:
+    """Return per‑pixel Sobel edge magnitude (0‑255) using only luminance."""
+    # Build luminance array (1 byte per pixel) — this is the only large allocation
+    lum = bytearray(width * height)
+    for y in range(height):
+        row_start = y * width
+        for x in range(width):
+            r, g, b = px[x, y][:3]
+            lum[row_start + x] = _luminance(r, g, b)
+
+    scores = bytearray(width * height)
+    for y in range(height):
+        for x in range(width):
+            # 3x3 neighbourhood with mirroring
+            vals = []
+            for dy in (-1, 0, 1):
+                ny = max(0, min(y + dy, height - 1))
+                for dx in (-1, 0, 1):
+                    nx = max(0, min(x + dx, width - 1))
+                    vals.append(lum[ny * width + nx])
+            # Sobel kernels
+            gx = (-1*vals[0] + 0*vals[1] + 1*vals[2]
+                  -2*vals[3] + 0*vals[4] + 2*vals[5]
+                  -1*vals[6] + 0*vals[7] + 1*vals[8])
+            gy = (-1*vals[0] -2*vals[1] -1*vals[2]
+                  +0*vals[3] + 0*vals[4] + 0*vals[5]
+                  +1*vals[6] + 2*vals[7] + 1*vals[8])
+            mag = math.sqrt(gx * gx + gy * gy)
+            # scale to 0‑255 (most magnitudes < 1000 for 8‑bit images)
+            scores[y * width + x] = min(255, int(mag * 0.25))
+    return scores
+
+
+def _find_threshold_from_histogram(hist: list[int], required_bits: int) -> int:
+    """Find the highest threshold where cumulative eligible channels >= required_bits."""
+    cumulative = 0
+    for level in range(255, -1, -1):
+        cumulative += hist[level]
+        if cumulative >= required_bits:
+            return level
+    raise ValueError("Image texture capacity insufficient for payload.")
+
+
+# ── CSPRNG‑based Feistel permutation (memoryless) ─────────────────────────────
+
+def _feistel_permute(index: int, modulus_bits: int, key: bytes) -> int:
+    """8‑round Feistel network on [0, 2^modulus_bits-1] keyed by *key*."""
+    if modulus_bits <= 0:
+        return 0
+    modulus = 1 << modulus_bits
+    half = modulus_bits // 2
+    other = modulus_bits - half
+    left = index >> other
+    right = index & ((1 << other) - 1)
+
+    for rnd in range(8):
+        h = hmac.digest(key, struct.pack(">I", rnd) + right.to_bytes((other + 7) // 8, "big"), "sha256")
+        f_int = int.from_bytes(h[: (half + 7) // 8], "big")
+        if half > 0:
+            f_int &= (1 << half) - 1
+        new_left = right
+        new_right = left ^ f_int
+        left, right = new_left, new_right
+
+    return (left << other) | right
+
+
+def _permute_with_cycle_walk(index: int, max_val: int, key: bytes) -> int:
+    """Permute index in [0, max_val-1] using Feistel and cycle‑walk."""
+    if max_val <= 1:
+        return 0
+    bits = max_val.bit_length()
+    val = _feistel_permute(index, bits, key)
+    while val >= max_val:
+        val = _feistel_permute(val, bits, key)
+    return val
+
+
+def _derive_perm_key(salt: bytes) -> bytes:
+    """Key for Feistel permutation, independent of encryption key."""
+    return hmac.digest(salt, b"lsb_embed_v3_perm", "sha256")
+
+
+# ── v4 fast vectorised primitives ────────────────────────────────────────────
+
+def _v4_seed_from_salt(salt: bytes) -> int:
+    """Derive a 32-bit MT19937 seed from the public salt (HMAC, domain-separated)."""
+    digest = hmac.digest(salt, b"lsb_embed_v4_perm", "sha256")
+    return int.from_bytes(digest[:4], "big")
+
+
+def _v4_edge_scores(rgb: np.ndarray) -> np.ndarray:
+    """Vectorised Sobel edge magnitude (0-255) over LSB-zeroed RGB.
+
+    ``rgb`` is an (H, W, 3) uint8 array.  Luminance is computed on the
+    LSB-cleared channels so the returned scores are invariant under LSB
+    replacement — this is what lets extraction recompute the identical
+    eligible set after embedding.  Output is a flat (H*W,) uint8 array in
+    row-major (y, x) order, matching pixel index = y*W + x.
+    """
+    base = (rgb & np.uint8(0xFE)).astype(np.float64)
+    lum = 0.299 * base[:, :, 0] + 0.587 * base[:, :, 1] + 0.114 * base[:, :, 2]
+    # Edge-replicate padding mirrors the clamp used by the scalar reference.
+    padded = np.pad(lum, 1, mode="edge")
+    gx = (
+        -1 * padded[:-2, :-2] + 1 * padded[:-2, 2:]
+        - 2 * padded[1:-1, :-2] + 2 * padded[1:-1, 2:]
+        - 1 * padded[2:, :-2] + 1 * padded[2:, 2:]
+    )
+    gy = (
+        -1 * padded[:-2, :-2] - 2 * padded[:-2, 1:-1] - 1 * padded[:-2, 2:]
+        + 1 * padded[2:, :-2] + 2 * padded[2:, 1:-1] + 1 * padded[2:, 2:]
+    )
+    mag = np.sqrt(gx * gx + gy * gy) * 0.25
+    return np.minimum(255, mag.astype(np.int64)).astype(np.uint8).reshape(-1)
+
+
+def _v4_eligible_channels(scores: np.ndarray, threshold: int,
+                          header_bits: int, total_channels: int) -> np.ndarray:
+    """Return sorted absolute channel indices eligible for payload embedding.
+
+    A channel at absolute index ``abs_ch`` (= pixel_idx*3 + ch) is eligible
+    when it lies past the sequential header region AND its pixel's edge score
+    meets ``threshold``.  Order is ascending abs_ch, identical on embed and
+    extract before the permutation is applied.
+    """
+    # Per-pixel eligibility, expanded to 3 channels each.
+    pixel_ok = scores >= threshold                    # (H*W,) bool
+    chan_ok = np.repeat(pixel_ok, 3)                  # (H*W*3,) bool
+    all_ch = np.arange(total_channels, dtype=np.int64)
+    chan_ok &= all_ch >= header_bits                  # exclude header region
+    return all_ch[chan_ok]
+
+
+def _v4_threshold_from_scores(scores: np.ndarray, header_bits: int,
+                              total_channels: int, required_bits: int) -> int:
+    """Highest threshold whose eligible-channel count still covers required_bits.
+
+    Uses a score-weighted histogram of per-pixel free-channel counts so the
+    search is O(N + 256) rather than O(256*N).
+    """
+    n_pixels = scores.shape[0]
+    starts = np.arange(n_pixels, dtype=np.int64) * 3
+    ends = starts + 3
+    free = (np.minimum(ends, total_channels) - np.maximum(starts, header_bits))
+    free = np.clip(free, 0, 3)                        # channels per pixel past header
+    # channels_at_level[s] = total eligible channels contributed by pixels of score s
+    channels_at_level = np.bincount(scores, weights=free, minlength=256).astype(np.int64)
+    cumulative = 0
+    for level in range(255, -1, -1):
+        cumulative += int(channels_at_level[level])
+        if cumulative >= required_bits:
+            return level
+    raise ValueError("Image texture capacity insufficient for payload.")
+
+
+# ── LSB matching ──────────────────────────────────────────────────────────────
+
+def _lsb_match(pixel_channel: int, desired_bit: int) -> int:
+    """Return channel value with LSB == desired_bit, using ±1 if needed."""
+    if (pixel_channel & 1) == desired_bit:
+        return pixel_channel
+    if pixel_channel == 0:
+        return 1
+    if pixel_channel == 255:
+        return 254
+    return pixel_channel + secrets.choice((-1, 1))
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -260,167 +413,159 @@ def hide_file_in_image(
     output_path: str,
     password: str = None,
 ) -> str:
-    """Hide a file in an image using LSB steganography with compression.
+    """Hide a file using detection‑resistant steganography (new adaptive writer).
 
-    Writes a **v2** wire-format blob (see module docstring).  Existing images
-    written in v1 format remain extractable — extraction is backward-compatible.
-
-    When a password is supplied both the file metadata (filename + MIME type)
-    and the file payload are encrypted independently with Fernet, so an
-    adversary who reads the raw LSBs without the password learns *nothing*
-    about the hidden file — not even its name.
-
-    Args:
-        image_path:  Path to the host image
-        file_path:   Path to the file to hide
-        output_path: Path where the output image will be saved
-        password:    Optional encryption password
-
-    Returns:
-        Path to the output image
-
-    Raises:
-        ValueError: If the image doesn't have enough capacity, or if
-                    metadata exceeds the maximum allowed length.
+    - File is compressed, then Reed‑Solomon ECC is applied.
+    - Only high‑texture pixels (Sobel edge magnitude) carry payload bits.
+    - Edge scores are computed on LSB‑zeroed values and payload is embedded by
+      LSB replacement, so scores (and thus eligibility) are identical on embed
+      and extract.
+    - Payload channel order is a NumPy MT19937 permutation seeded from the salt.
+    - The adaptive threshold is stored in the header (1 byte).
+    - An alpha channel, if present, is preserved untouched.
+    - Original PNG metadata (text chunks, EXIF) is preserved.
     """
-    # Open the host image — we need the pixel list for writing back via putdata()
-    host_img = Image.open(image_path).convert("RGB")
+    # ── Open image, preserve metadata ─────────────────────────────────────────
+    original_img = Image.open(image_path)
+    original_info = original_img.info.copy() if original_img.format == "PNG" else {}
+    # Payload is embedded only in the RGB channels; an alpha channel (if any)
+    # is preserved untouched.  Work in RGB for embedding.
+    has_alpha = original_img.mode in ("RGBA", "LA", "PA")
+    alpha_arr = None
+    if has_alpha:
+        rgba = original_img.convert("RGBA")
+        rgb_arr = np.asarray(rgba, dtype=np.uint8)[:, :, :3].copy()
+        alpha_arr = np.asarray(rgba, dtype=np.uint8)[:, :, 3].copy()
+        width, height = rgba.width, rgba.height
+    else:
+        rgb_img = original_img.convert("RGB")
+        rgb_arr = np.asarray(rgb_img, dtype=np.uint8).copy()
+        width, height = rgb_img.width, rgb_img.height
+    total_pixels = width * height
+    if total_pixels > (_MAX_PAYLOAD_BYTES * 8 // 3):
+        raise ValueError("Host image dimensions exceed the maximum supported size.")
 
-    # Guard: cap pixel allocation before we materialise it.
-    total_pixels = host_img.width * host_img.height
-    max_pixels = _MAX_PAYLOAD_BYTES * 8 // 3  # inverse of capacity formula
-    if total_pixels > max_pixels:
-        raise ValueError(
-            "Host image dimensions exceed the maximum supported size."
-        )
-
-    # get_flattened_data() replaces the deprecated getdata() (removed in
-    # Pillow 14).  It returns a tuple of pixel tuples; we need a mutable list
-    # for the in-place LSB edits before putdata() writes them back.
-    host_pixels = list(host_img.get_flattened_data())
-
-    # ── 1. Read the file; compress only when not encrypting ──────────────────
-    # Compressing plaintext BEFORE encryption leaks information about the
-    # plaintext through the ciphertext length — the CRIME/BREACH family of
-    # attacks.  Fernet ciphertext is pseudo-random and compresses ~0%, so
-    # skipping compression for encrypted payloads has no space cost and
-    # eliminates the oracle entirely.
+    # ── 1. Prepare file data: compress → ECC → (encrypt) ──────────────────────
     with open(file_path, "rb") as f:
         file_data = f.read()
 
+    compressed = zlib.compress(file_data, level=9)
+    ecc_data = _ecc_encode(compressed)      # ECC after compression
+
+    # Plain / encrypted path
     if password:
-        # Encrypt-only path: no compression (closed CRIME/BREACH oracle)
-        payload_bytes_plain = file_data
+        payload_bytes_plain = ecc_data
+        flag = _FLAG_ENC_ONLY_FAST
     else:
-        # Plain path: compress as before
-        payload_bytes_plain = zlib.compress(file_data, level=9)
+        payload_bytes_plain = ecc_data
+        flag = _FLAG_PLAIN_FAST
 
-    # ── 2. Build metadata string ──────────────────────────────────────────────
+    # ── 2. Metadata ──────────────────────────────────────────────────────────
     original_filename = os.path.basename(file_path)
-
-    # Use an explicit curated map first — this is OS-independent and immune to
-    # Windows registry corruption (e.g. .docx → spreadsheet MIME, .zip →
-    # x-zip-compressed).  Fall back to mimetypes only for unknown extensions.
     ext = os.path.splitext(file_path)[1].lower()
     _MIME_MAP = {
-        # Images
-        ".png":  "image/png",
-        ".jpg":  "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif":  "image/gif",
-        ".bmp":  "image/bmp",
-        ".webp": "image/webp",
-        # Documents
-        ".pdf":  "application/pdf",
-        ".txt":  "text/plain",
-        ".doc":  "application/msword",
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".bmp": "image/bmp", ".webp": "image/webp",
+        ".pdf": "application/pdf", ".txt": "text/plain", ".doc": "application/msword",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        # Archives / packages
-        ".zip":  "application/zip",
-        ".apk":  "application/vnd.android.package-archive",
-        # Video
-        ".mp4":  "video/mp4",
+        ".zip": "application/zip", ".apk": "application/vnd.android.package-archive",
+        ".mp4": "video/mp4",
     }
     mime_type = _MIME_MAP.get(ext) or mimetypes.guess_type(file_path)[0] or "application/octet-stream"
-
     metadata_plain = f"{original_filename}|{mime_type}".encode("utf-8")
-
-    # ── 3. Validate metadata length (v2 defence-in-depth) ────────────────────
-    # This check applies to the plaintext.  After Fernet encryption the
-    # ciphertext is larger; _encode_metadata_length() re-checks the final size.
     if len(metadata_plain) > _MAX_METADATA_PLAIN_LEN:
-        raise ValueError(
-            f"Filename or MIME type is too long "
-            f"(metadata {len(metadata_plain)} B > {_MAX_METADATA_PLAIN_LEN} B limit)."
-        )
+        raise ValueError(f"Metadata too long ({len(metadata_plain)} B).")
 
-    # ── 4. Encrypt or pass-through depending on password ─────────────────────
-    # flag 0x03 = encrypt-only (no prior compression) — current writer.
-    # flag 0x00 = plain (compressed, unencrypted).
-    # flag 0x01 = old compress-then-encrypt — only ever written by legacy code;
-    #             kept readable by the extractor for backward compatibility.
-    password_flag = bytes([_FLAG_ENC_ONLY]) if password else bytes([_FLAG_PLAIN])
-    salt = b""
-
+    # ── 3. Encryption / pass‑through ──────────────────────────────────────────
+    salt = secrets.token_bytes(16)
     if password:
-        salt = secrets.token_bytes(16)  # 16-byte random salt
         key = _derive_key_from_password(password, salt)
         fernet = Fernet(key)
-
-        # Encrypt metadata and payload with the SAME key but as two independent
-        # Fernet tokens.  Each token carries its own IV and HMAC so they are
-        # cryptographically independent — knowing one does not help decrypt the
-        # other without the key.
-        # payload_bytes_plain is NOT compressed (no compression-oracle risk).
-        metadata_field = fernet.encrypt(metadata_plain)        # ciphertext
-        payload_field  = fernet.encrypt(payload_bytes_plain)   # ciphertext
-
-        # Memory hygiene (CWE-244): drop key material references as soon as
-        # encryption is done.  Full zeroization is impossible for immutable
-        # bytes — see utils/crypto_utils.py module docstring.
+        metadata_field = fernet.encrypt(metadata_plain)
+        payload_field = fernet.encrypt(payload_bytes_plain)
         key = fernet = None
     else:
-        # No password: store plaintext metadata and zlib-compressed payload.
         metadata_field = metadata_plain
-        payload_field  = payload_bytes_plain   # already compressed above
+        payload_field = payload_bytes_plain
 
-    # ── 5. Encode lengths (v2: 4-byte metadata_length) ───────────────────────
-    # _encode_metadata_length() performs an explicit cap check *before*
-    # calling to_bytes(), converting any future OverflowError into a clear
-    # ValueError 400 — closing the M-06 DoS vector entirely.
-    metadata_length = _encode_metadata_length(len(metadata_field))  # 4 bytes
-    data_length     = len(payload_field).to_bytes(_DATA_LEN_BYTES, "big")
+    # ── 4. Build header (without threshold yet) ───────────────────────────────
+    metadata_length = _encode_metadata_length(len(metadata_field))
+    data_length = len(payload_field).to_bytes(_DATA_LEN_BYTES, "big")
+    header_base = (
+        _V2_MAGIC +
+        bytes([flag]) +
+        salt +
+        metadata_length +
+        metadata_field +
+        data_length
+    )   # threshold will be appended after we determine it
 
-    # ── 6. Assemble the v2 blob ───────────────────────────────────────────────
-    # Layout: [magic(2)] [password_flag(1)] [salt?(16)] [metadata_len(4)] [meta] [data_len(4)] [payload]
-    data_to_hide = (
-        _V2_MAGIC + password_flag + salt + metadata_length + metadata_field + data_length + payload_field
+    header_base_bits = len(header_base) * 8
+    payload_bits = len(payload_field) * 8
+    total_channels = width * height * 3
+    if header_base_bits + payload_bits + _THRESHOLD_BYTES * 8 > total_channels:
+        raise ValueError("Host image capacity insufficient for header, threshold, and payload.")
+
+    # ── 5. Flatten channels; edge scores are LSB-invariant ────────────────────
+    # flat[abs_ch] is the value of channel (abs_ch % 3) of pixel (abs_ch // 3),
+    # with pixel index in row-major (y, x) order — matching _v4_edge_scores.
+    flat = rgb_arr.reshape(-1)                        # (H*W*3,) uint8, view
+    scores = _v4_edge_scores(rgb_arr)                 # (H*W,) uint8, LSB-invariant
+
+    # ── 6. Find adaptive threshold over the region past the full header ───────
+    full_header_len = len(header_base) + _THRESHOLD_BYTES
+    header_total_bits = full_header_len * 8
+    if header_total_bits + payload_bits > total_channels:
+        raise ValueError("Host image capacity insufficient for header, threshold, and payload.")
+
+    threshold = _v4_threshold_from_scores(
+        scores, header_total_bits, total_channels, payload_bits
     )
 
-    # ── 7. Capacity check ────────────────────────────────────────────────────
-    if len(data_to_hide) * 8 > total_pixels * 3:
-        raise ValueError("Host image does not have enough capacity to store the data.")
+    # ── 7. Embed the full header (header_base + threshold) sequentially ───────
+    full_header = header_base + struct.pack("B", threshold)
+    header_bits_arr = np.unpackbits(
+        np.frombuffer(full_header, dtype=np.uint8)
+    )                                                 # MSB-first, matches reader
+    n_hdr = header_bits_arr.size
+    flat[:n_hdr] = (flat[:n_hdr] & np.uint8(0xFE)) | header_bits_arr
 
-    # ── 8. Embed via LSB ─────────────────────────────────────────────────────
-    data_index = 0
-    bit_index  = 0
+    # ── 8. Embed payload into permuted eligible channels (LSB replacement) ────
+    eligible = _v4_eligible_channels(scores, threshold, header_total_bits, total_channels)
+    if eligible.size < payload_bits:
+        raise ValueError("Failed to embed all payload bits — image texture insufficient.")
 
-    for i, pixel in enumerate(host_pixels):
-        pixel = list(pixel)
-        for channel in range(3):
-            if data_index < len(data_to_hide):
-                byte = data_to_hide[data_index]
-                pixel[channel] = (pixel[channel] & ~1) | ((byte >> (7 - bit_index)) & 1)
-                bit_index += 1
-                if bit_index == 8:
-                    bit_index  = 0
-                    data_index += 1
-        host_pixels[i] = tuple(pixel)
+    rng = np.random.RandomState(_v4_seed_from_salt(salt))
+    perm = rng.permutation(eligible.size)
+    target_channels = eligible[perm[:payload_bits]]
 
-    # ── 9. Save ──────────────────────────────────────────────────────────────
-    host_img.putdata(host_pixels)
-    host_img.save(output_path, "PNG", optimize=False, compress_level=0)
+    payload_bits_arr = np.unpackbits(
+        np.frombuffer(payload_field, dtype=np.uint8)
+    )                                                 # MSB-first
+    flat[target_channels] = (flat[target_channels] & np.uint8(0xFE)) | payload_bits_arr
+
+    # ── 9. Reassemble and save with original PNG metadata ─────────────────────
+    out_rgb = flat.reshape(height, width, 3)
+    if has_alpha:
+        out_arr = np.dstack([out_rgb, alpha_arr])
+        host_img = Image.fromarray(out_arr, "RGBA")
+    else:
+        host_img = Image.fromarray(out_rgb, "RGB")
+
+    pnginfo = PngImagePlugin.PngInfo()
+    for k, v in original_info.items():
+        if isinstance(v, str):
+            pnginfo.add_text(k, v, zip=False)
+    exif = original_info.get("exif")
+
+    host_img.save(
+        output_path, "PNG",
+        optimize=False,
+        compress_level=9,
+        pnginfo=pnginfo,
+        exif=exif,
+    )
     return output_path
 
 
@@ -428,107 +573,201 @@ def extract_file_from_image(
     image_path: str,
     password: str = None,
 ) -> tuple[bytes, str, str]:
-    """Extract a hidden file from an image using a streaming LSB reader.
-
-    Transparently handles both **v1** (legacy 2-byte metadata_length) and
-    **v2** (current 4-byte metadata_length) wire formats.  Detection is based
-    on the first two bytes: if they equal ``_V2_MAGIC`` (``0xFF 0x02``) the v2
-    parser is used; otherwise the v1 parser is used.
-
-    The extractor reads only as many pixels as required to reconstruct the
-    payload — it never materialises the full pixel list or a full bit-list.
-    Peak memory per request is proportional to the *extracted* payload size,
-    not to the image size.
-
-    Args:
-        image_path: Path to the image containing hidden data
-        password:   Password for decryption (if the file was encrypted)
-
-    Returns:
-        Tuple of (file_data, original_filename, mime_type)
-
-    Raises:
-        ValueError: If extraction fails, image is too small, or password is wrong
-    """
+    """Extract a hidden file (transparent v1/v2/v3/v4 support)."""
     img = Image.open(image_path)
+    width, height = img.width, img.height
+    total_channels = width * height * 3
+    max_carriable = total_channels // 8
 
-    # Compute the maximum bytes this image can carry — used to cap data_length
-    # before we start reading, preventing crafted 4 GB data_length values.
-    max_carriable = (img.width * img.height * 3) // 8
-
-    gen = _iter_lsb_bytes(img)
-
+    gen_seq = _iter_lsb_bytes(img)
     try:
-        # ── Version sniff (2 bytes) ───────────────────────────────────────────
-        # Read the first two bytes to determine the wire format version.
-        # We cannot "un-read" from the generator, so we always consume exactly
-        # 2 bytes here; the v1 path repurposes the second byte as part of the
-        # password flag / salt.
-        first_two = _read_exactly(gen, 2, "version header")
+        first_two = _read_exactly(gen_seq, 2, "version header")
 
         if first_two == _V2_MAGIC:
-            # ── V2 parser ────────────────────────────────────────────────────
-            metadata_bytes, payload_bytes, has_password, salt, is_compressed = _parse_v2(
-                gen, max_carriable, password
+            password_flag_byte = _read_exactly(gen_seq, 1, "password flag")[0]
+            flag = password_flag_byte
+
+            # Determine basic properties
+            has_password = flag in (
+                _FLAG_ENC_COMPRESSED_SEQUENTIAL, _FLAG_ENC_ONLY_SEQUENTIAL,
+                _FLAG_ENC_ONLY_RANDOM, _FLAG_ENC_COMPRESSED_RANDOM,
+                _FLAG_ENC_ONLY_ADAPTIVE_NEW, _FLAG_ENC_COMPRESSED_ADAPTIVE_NEW,
+                _FLAG_ENC_ONLY_FAST,
             )
+            is_fast = flag in (_FLAG_PLAIN_FAST, _FLAG_ENC_ONLY_FAST)   # v4
+            is_v3_adaptive = flag in (
+                _FLAG_PLAIN_ADAPTIVE_NEW, _FLAG_ENC_ONLY_ADAPTIVE_NEW,
+                _FLAG_ENC_COMPRESSED_ADAPTIVE_NEW,
+            )
+            # Both v3 and v4 store the threshold byte in the header.
+            is_new_adaptive = is_v3_adaptive or is_fast
+            is_old_random = flag in (_FLAG_PLAIN_RANDOM, _FLAG_ENC_ONLY_RANDOM,
+                                     _FLAG_ENC_COMPRESSED_RANDOM)
+            is_random_embed = is_new_adaptive or is_old_random
+            is_compressed = flag in (
+                _FLAG_PLAIN_SEQUENTIAL, _FLAG_PLAIN_RANDOM,
+                _FLAG_ENC_COMPRESSED_SEQUENTIAL, _FLAG_ENC_COMPRESSED_RANDOM,
+                _FLAG_PLAIN_ADAPTIVE_NEW, _FLAG_ENC_COMPRESSED_ADAPTIVE_NEW,
+            )
+
+            if has_password and not password:
+                raise ValueError("This file is password-protected. Please provide the password.")
+
+            # Read salt (if needed).  Plain fast/adaptive flags still carry a
+            # salt (used to seed the payload permutation), so include them.
+            salt = b""
+            if has_password or flag in (
+                _FLAG_PLAIN_RANDOM, _FLAG_PLAIN_ADAPTIVE_NEW, _FLAG_PLAIN_FAST,
+            ):
+                salt = _read_exactly(gen_seq, 16, "salt")
+
+            # Metadata length and field
+            metadata_length = int.from_bytes(
+                _read_exactly(gen_seq, _V2_META_LEN_BYTES, "metadata length"), "big"
+            )
+            max_meta_len = _MAX_METADATA_ENC_LEN if has_password else _MAX_METADATA_PLAIN_LEN
+            if metadata_length == 0 or metadata_length > max_meta_len:
+                raise ValueError("Metadata length is outside the valid range.")
+            metadata_bytes = _read_exactly(gen_seq, metadata_length, "metadata")
+
+            # Data length
+            data_length = int.from_bytes(
+                _read_exactly(gen_seq, _DATA_LEN_BYTES, "data length"), "big"
+            )
+            if data_length == 0 or data_length > min(max_carriable, _MAX_PAYLOAD_BYTES):
+                raise ValueError("Data length is invalid or exceeds image capacity.")
+
+            # For new adaptive format, read stored threshold
+            threshold = None
+            if is_new_adaptive:
+                threshold = _read_exactly(gen_seq, _THRESHOLD_BYTES, "threshold")[0]
+                header_bytes_consumed = (2 + 1 + len(salt) + _V2_META_LEN_BYTES +
+                                         metadata_length + _DATA_LEN_BYTES + _THRESHOLD_BYTES)
+            else:
+                header_bytes_consumed = (2 + 1 + len(salt) + _V2_META_LEN_BYTES +
+                                         metadata_length + _DATA_LEN_BYTES)
+            header_bits = header_bytes_consumed * 8
+
+            # Read payload
+            if is_fast and data_length > 0:
+                # ── v4 fast path: vectorised, mirrors the writer exactly ──────
+                rgb_arr = np.asarray(img.convert("RGB"), dtype=np.uint8)
+                flat = rgb_arr.reshape(-1)
+                scores = _v4_edge_scores(rgb_arr)     # LSB-invariant, same as embed
+                payload_bits = data_length * 8
+                eligible = _v4_eligible_channels(scores, threshold, header_bits, total_channels)
+                if eligible.size < payload_bits:
+                    raise ValueError("Adaptive extraction failed – not enough eligible channels.")
+                rng = np.random.RandomState(_v4_seed_from_salt(salt))
+                perm = rng.permutation(eligible.size)
+                target_channels = eligible[perm[:payload_bits]]
+                bits = (flat[target_channels] & 1).astype(np.uint8)
+                payload_field = np.packbits(bits).tobytes()
+            elif is_random_embed and data_length > 0:
+                # ── v3 / legacy random path: pure-Python Feistel walk ─────────
+                px = img.load()  # we need pixel access for edge scores and bit extraction
+                scores = _compute_edge_scores(px, width, height)
+                if not (is_new_adaptive and threshold is not None):
+                    # Old random flags: recompute threshold from image
+                    hist = [0] * 256
+                    for pix_idx in range(width * height):
+                        free_start = max(pix_idx * 3, header_bits)
+                        free_end = min((pix_idx + 1) * 3, total_channels)
+                        free_ch = max(0, free_end - free_start)
+                        if free_ch > 0:
+                            hist[scores[pix_idx]] += free_ch
+                    threshold = _find_threshold_from_histogram(hist, data_length * 8)
+
+                free_positions = total_channels - header_bits
+                perm_key = _derive_perm_key(salt)
+                payload_bytes = bytearray(data_length)
+                bits_read = 0
+                scan_idx = 0
+                while bits_read < data_length * 8 and scan_idx < free_positions:
+                    perm_pos = _permute_with_cycle_walk(scan_idx, free_positions, perm_key)
+                    abs_ch = header_bits + perm_pos
+                    pixel_idx = abs_ch // 3
+                    ch_idx = abs_ch % 3
+                    if scores[pixel_idx] >= threshold:
+                        pix = px[pixel_idx % width, pixel_idx // width]
+                        bit = pix[ch_idx] & 1
+                        byte_idx = bits_read // 8
+                        bit_pos = 7 - (bits_read % 8)
+                        payload_bytes[byte_idx] |= bit << bit_pos
+                        bits_read += 1
+                    scan_idx += 1
+                if bits_read < data_length * 8:
+                    raise ValueError("Adaptive extraction failed – not enough eligible channels.")
+                payload_field = bytes(payload_bytes)
+            else:
+                # Sequential payload (v1, v2, or plain sequential)
+                payload_field = _read_exactly(gen_seq, data_length, "payload")
+
         else:
-            # ── V1 parser (backward-compatible) ──────────────────────────────
-            # first_two[0] is the password_flag byte.
-            # first_two[1] is the first byte of salt (if encrypted) or the
-            # first byte of the 2-byte metadata_length (if plain).
-            metadata_bytes, payload_bytes, has_password, salt, is_compressed = _parse_v1(
-                gen, first_two, max_carriable, password
+            # ── v1 parser ─────────────────────────────────────────────────────
+            password_flag_byte = first_two[0]
+            has_password = password_flag_byte == 0x01
+            is_compressed = True
+            is_new_adaptive = False
+            if has_password and not password:
+                raise ValueError("This file is password-protected.")
+            salt = b""
+            if has_password:
+                remaining_salt = _read_exactly(gen_seq, 15, "encryption salt")
+                salt = bytes([first_two[1]]) + remaining_salt
+            if has_password:
+                meta_len_bytes = _read_exactly(gen_seq, _V1_META_LEN_BYTES, "metadata length")
+            else:
+                second_byte = _read_exactly(gen_seq, 1, "metadata length")
+                meta_len_bytes = bytes([first_two[1]]) + second_byte
+            metadata_length = int.from_bytes(meta_len_bytes, "big")
+            max_meta_len = _MAX_METADATA_ENC_LEN if has_password else _MAX_METADATA_PLAIN_LEN
+            if metadata_length == 0 or metadata_length > max_meta_len:
+                raise ValueError("Metadata length out of range.")
+            metadata_bytes = _read_exactly(gen_seq, metadata_length, "metadata")
+            data_length = int.from_bytes(
+                _read_exactly(gen_seq, _DATA_LEN_BYTES, "data length"), "big"
             )
+            if data_length == 0 or data_length > min(max_carriable, _MAX_PAYLOAD_BYTES):
+                raise ValueError("Data length invalid.")
+            payload_field = _read_exactly(gen_seq, data_length, "payload")
 
-        # ── Decrypt (if needed) ───────────────────────────────────────────────
+        # ── Decrypt if needed ─────────────────────────────────────────────────
         if has_password:
-            if not password:
-                raise ValueError("Password is required to extract this file.")
             try:
-                key    = _derive_key_from_password(password, salt)
+                key = _derive_key_from_password(password, salt)
                 fernet = Fernet(key)
-
-                # Decrypt metadata first — if the password is wrong Fernet raises
-                # InvalidToken here, before we even touch the (potentially large)
-                # payload, giving a fast failure path.
                 metadata_plain = fernet.decrypt(metadata_bytes)
-                payload_bytes  = fernet.decrypt(payload_bytes)
+                payload_field = fernet.decrypt(payload_field)
             except Exception:
                 raise ValueError("Incorrect password.")
             finally:
-                # Memory hygiene (CWE-244): drop key material references as
-                # soon as decryption is done (or fails).  Full zeroization is
-                # impossible for immutable bytes — see utils/crypto_utils.py.
                 key = fernet = None
         else:
             metadata_plain = metadata_bytes
 
-        # ── Parse metadata ────────────────────────────────────────────────────
+        # ── Metadata parsing ──────────────────────────────────────────────────
         try:
             metadata = metadata_plain.decode("utf-8")
         except UnicodeDecodeError:
-            raise ValueError(
-                "Embedded metadata is not valid UTF-8. "
-                "The image may not contain hidden data or may be corrupted."
-            )
-
+            raise ValueError("Metadata is not valid UTF-8. The image may be corrupted.")
         if "|" not in metadata:
-            raise ValueError(
-                "Embedded metadata is malformed (missing separator). "
-                "The image may not contain hidden data or may be corrupted."
-            )
+            raise ValueError("Metadata malformed (missing separator).")
         original_filename, mime_type = metadata.split("|", 1)
 
-        # ── Decompress (only if the payload was stored compressed) ────────────
-        # flag 0x00 (plain) and 0x01 (old compress-then-encrypt) store
-        # compressed data; flag 0x03 (current encrypt-only) does not, so the
-        # decompression step is skipped for it.  _safe_decompress caps the
-        # output size — a plain zlib.decompress() would let a small crafted
-        # payload inflate to gigabytes (CWE-409).
-        if is_compressed:
-            file_data = _safe_decompress(payload_bytes)
+        # ── Reverse payload processing: (decrypt) → ECC decode → decompress ───
+        # For new adaptive flags: payload is ECC(compressed(data)) [possibly encrypted]
+        if is_new_adaptive:
+            # ECC is always present, then compression
+            plain_with_ecc = payload_field
+            plain_compressed = _ecc_decode(plain_with_ecc)
+            file_data = _safe_decompress(plain_compressed)
         else:
-            file_data = payload_bytes
+            # Legacy paths
+            if is_compressed:
+                file_data = _safe_decompress(payload_field)
+            else:
+                file_data = payload_field
 
         return file_data, original_filename, mime_type
 
@@ -536,140 +775,3 @@ def extract_file_from_image(
         raise
     except Exception as exc:
         raise ValueError(f"Failed to extract file: {exc}") from exc
-
-
-# ── Private wire-format parsers ────────────────────────────────────────────────
-
-def _parse_v2(
-    gen,
-    max_carriable: int,
-    password: str | None,
-) -> tuple[bytes, bytes, bool, bytes, bool]:
-    """Parse a v2 blob from *gen* (magic already consumed by caller).
-
-    Returns:
-        (metadata_bytes, payload_bytes, has_password, salt, is_compressed)
-    """
-    # ── Password flag (1 byte) ────────────────────────────────────────────────
-    password_flag_byte = _read_exactly(gen, 1, "password flag")[0]
-
-    has_password  = password_flag_byte in (_FLAG_ENC_COMPRESSED, _FLAG_ENC_ONLY)
-    # payload was zlib-compressed for plain (0x00) and old encrypted (0x01);
-    # new encrypted payloads (0x03) are stored uncompressed.
-    is_compressed = password_flag_byte in (_FLAG_PLAIN, _FLAG_ENC_COMPRESSED)
-
-    if has_password and not password:
-        raise ValueError("This file is password-protected. Please provide the password.")
-
-    # ── Salt (16 bytes, only if encrypted) ────────────────────────────────────
-    salt = b""
-    if has_password:
-        salt = _read_exactly(gen, 16, "encryption salt")
-
-    # ── Metadata length (4 bytes, big-endian) ─────────────────────────────────
-    metadata_length = int.from_bytes(
-        _read_exactly(gen, _V2_META_LEN_BYTES, "metadata length"), "big"
-    )
-
-    max_meta_len = _MAX_METADATA_ENC_LEN if has_password else _MAX_METADATA_PLAIN_LEN
-    if metadata_length == 0 or metadata_length > max_meta_len:
-        raise ValueError(
-            f"Embedded metadata length ({metadata_length} B) is outside the "
-            f"valid range [1, {max_meta_len}]. "
-            "The image may not contain hidden data or may be corrupted."
-        )
-
-    # ── Metadata field ────────────────────────────────────────────────────────
-    metadata_bytes = _read_exactly(gen, metadata_length, "metadata")
-
-    # ── Data length (4 bytes, big-endian) ─────────────────────────────────────
-    data_length = int.from_bytes(
-        _read_exactly(gen, _DATA_LEN_BYTES, "data length"), "big"
-    )
-
-    if data_length == 0 or data_length > min(max_carriable, _MAX_PAYLOAD_BYTES):
-        raise ValueError(
-            f"Embedded data length ({data_length} B) exceeds the image's "
-            "carrying capacity. The image may not contain hidden data or "
-            "may be corrupted."
-        )
-
-    # ── Payload ───────────────────────────────────────────────────────────────
-    payload_bytes = _read_exactly(gen, data_length, "payload")
-
-    return metadata_bytes, payload_bytes, has_password, salt, is_compressed
-
-
-def _parse_v1(
-    gen,
-    first_two: bytes,
-    max_carriable: int,
-    password: str | None,
-) -> tuple[bytes, bytes, bool, bytes, bool]:
-    """Parse a legacy v1 blob.
-
-    *first_two* contains the two bytes already consumed by the version sniffer:
-    ``first_two[0]`` is the v1 password_flag; ``first_two[1]`` is the first
-    byte of the 15 remaining salt bytes (encrypted) or the first byte of the
-    2-byte metadata_length (plain).
-
-    v1 payloads are ALWAYS zlib-compressed (flag 0x00 = compressed-plain,
-    flag 0x01 = compress-then-encrypt), so ``is_compressed`` is always True.
-
-    Returns:
-        (metadata_bytes, payload_bytes, has_password, salt, is_compressed)
-    """
-    password_flag_byte = first_two[0]
-    has_password = password_flag_byte == 0x01
-
-    if has_password and not password:
-        raise ValueError("This file is password-protected. Please provide the password.")
-
-    # ── Salt (16 bytes total; first byte already in first_two[1]) ─────────────
-    salt = b""
-    if has_password:
-        # We consumed first_two[1] as the 2nd byte of the version-sniff, but
-        # it is actually the 1st byte of the 16-byte salt.  Read the remaining
-        # 15 bytes from the generator and prepend.
-        remaining_salt = _read_exactly(gen, 15, "encryption salt")
-        salt = bytes([first_two[1]]) + remaining_salt
-
-    # ── Metadata length (2 bytes, big-endian — v1 legacy width) ───────────────
-    if has_password:
-        # Salt was fully consumed above; now read the two metadata-length bytes.
-        meta_len_bytes = _read_exactly(gen, _V1_META_LEN_BYTES, "metadata length")
-    else:
-        # No salt: first_two[1] is the high byte of the 2-byte metadata_length.
-        second_byte = _read_exactly(gen, 1, "metadata length")
-        meta_len_bytes = bytes([first_two[1]]) + second_byte
-
-    metadata_length = int.from_bytes(meta_len_bytes, "big")
-
-    max_meta_len = _MAX_METADATA_ENC_LEN if has_password else _MAX_METADATA_PLAIN_LEN
-    if metadata_length == 0 or metadata_length > max_meta_len:
-        raise ValueError(
-            f"Embedded metadata length ({metadata_length} B) is outside the "
-            f"valid range [1, {max_meta_len}]. "
-            "The image may not contain hidden data or may be corrupted."
-        )
-
-    # ── Metadata field ────────────────────────────────────────────────────────
-    metadata_bytes = _read_exactly(gen, metadata_length, "metadata")
-
-    # ── Data length (4 bytes, big-endian — same width in both versions) ────────
-    data_length = int.from_bytes(
-        _read_exactly(gen, _DATA_LEN_BYTES, "data length"), "big"
-    )
-
-    if data_length == 0 or data_length > min(max_carriable, _MAX_PAYLOAD_BYTES):
-        raise ValueError(
-            f"Embedded data length ({data_length} B) exceeds the image's "
-            "carrying capacity. The image may not contain hidden data or "
-            "may be corrupted."
-        )
-
-    # ── Payload ───────────────────────────────────────────────────────────────
-    payload_bytes = _read_exactly(gen, data_length, "payload")
-
-    # v1 always stores compressed data (both plain 0x00 and encrypted 0x01).
-    return metadata_bytes, payload_bytes, has_password, salt, True
