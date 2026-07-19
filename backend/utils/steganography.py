@@ -574,7 +574,14 @@ def extract_file_from_image(
     password: str = None,
 ) -> tuple[bytes, str, str]:
     """Extract a hidden file (transparent v1/v2/v3/v4 support)."""
+    # Normalize to RGB: the hide path always writes RGB/RGBA PNGs, but a
+    # grayscale ("L"), palette ("P"), or CMYK upload would make px[x, y]
+    # return an int (or 4-tuple), crashing pixel[:3] in _iter_lsb_bytes /
+    # _compute_edge_scores with a 500.  RGBA→RGB drops alpha without
+    # blending, so the embedded RGB channels are read back unchanged.
     img = Image.open(image_path)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
     width, height = img.width, img.height
     total_channels = width * height * 3
     max_carriable = total_channels // 8
