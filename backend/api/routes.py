@@ -6,6 +6,7 @@ import os
 import secrets
 import uuid
 from io import BytesIO
+from collections import OrderedDict
 import logging
 import hashlib
 import re
@@ -33,9 +34,16 @@ from utils.qr_stego import (
 api = Blueprint('api', __name__, url_prefix='/api')
 logger = logging.getLogger(__name__)
 
-# In-memory cache for QR detection deduplication
-# Structure: {md5_hash: (timestamp, response_data)}
-qr_detection_cache = {}
+# In-memory cache for QR detection deduplication.
+# Structure: {sha256_hash: (timestamp, response_data)}.  Entries expire after
+# 5 s (cleaned at the top of each /qr/detect request) and the OrderedDict is
+# hard-capped at _QR_CACHE_MAX so a multi-IP burst can never grow it
+# unboundedly between cleanups.  SHA-256 rather than MD5 so an attacker
+# cannot use a chosen-prefix collision to poison another frame's cached
+# detection result.
+qr_detection_cache = OrderedDict()
+_QR_CACHE_MAX = 256
+_QR_CACHE_TTL_SECONDS = 5
 
 
 # Security: Sanitize error messages for production
@@ -814,13 +822,16 @@ def detect_qr():
             logger.debug('QR detection: Empty image file')
             return jsonify({'detected': False}), 200
         
-        # Calculate MD5 hash for deduplication
+        # Hash for deduplication.  SHA-256 (not MD5): collision resistance
+        # matters here because a cache hit returns another request's cached
+        # response.
         image_data = image_file.read()
-        image_hash = hashlib.md5(image_data).hexdigest()
+        image_hash = hashlib.sha256(image_data).hexdigest()
         current_time = time.time()
-        
-        # Clean up expired cache entries (older than 5 seconds)
-        expired_keys = [k for k, v in qr_detection_cache.items() if current_time - v[0] > 5]
+
+        # Clean up expired cache entries
+        expired_keys = [k for k, v in qr_detection_cache.items()
+                        if current_time - v[0] > _QR_CACHE_TTL_SECONDS]
         for k in expired_keys:
             del qr_detection_cache[k]
             logger.debug(f'QR detection: Cleaned up expired cache entry {k[:8]}...')
@@ -864,9 +875,12 @@ def detect_qr():
             else:
                 logger.debug('QR detection: No QR code in frame')
             
-            # Cache the response
+            # Cache the response; evict oldest entries past the hard cap so
+            # the dict stays bounded even under a multi-IP request burst.
             response_data = {'detected': detected, 'success': True}
             qr_detection_cache[image_hash] = (current_time, response_data)
+            while len(qr_detection_cache) > _QR_CACHE_MAX:
+                qr_detection_cache.popitem(last=False)
             logger.debug(f'QR detection: Cached response for hash {image_hash[:8]}...')
             
             return jsonify(response_data), 200
