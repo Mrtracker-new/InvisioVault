@@ -38,6 +38,12 @@ _SIG_Z64_EOC = b"PK\x06\x06"   # ZIP64 End of Central Directory
 _U32_MAX = 0xFFFF_FFFF          # ZIP64 sentinel for 32-bit fields
 _U16_MAX = 0xFFFF               # ZIP64 sentinel for 16-bit fields
 
+# Decompression cap for extraction (zip-bomb / OOM guard).  Mirrors
+# MAX_HIDEABLE_FILE_SIZE in utils.validators — the hide endpoints never embed
+# more than 50 MB, so any entry claiming to inflate past this is hostile.
+# (Kept as a local constant to avoid a utils.validators import cycle.)
+_MAX_EXTRACT_SIZE = 50 * 1024 * 1024  # 50 MB
+
 # EOCD field offsets (relative to start of EOCD record)
 _EOCD_OFF_CD_OFFSET = 16        # uint32 LE: offset of CD start
 
@@ -530,6 +536,26 @@ def _patch_z64_extra_lho(
     return False
 
 
+def _check_extract_size(info) -> None:
+    """Reject ZIP entries whose declared decompressed size exceeds the cap.
+
+    Guards against zip bombs inside polyglots: ``zf.read()`` inflates the
+    whole entry into memory, so a small archive claiming multi-GB output
+    would OOM the process.  Both ``zipfile`` and ``pyzipper`` truncate
+    reads at the declared ``file_size``, so validating the header value
+    is sufficient.
+
+    Raises:
+        ValueError: If the entry is too large to extract safely.
+    """
+    if info.file_size > _MAX_EXTRACT_SIZE:
+        raise ValueError(
+            "Embedded file is too large to extract safely "
+            f"(declared size {info.file_size} bytes exceeds "
+            f"{_MAX_EXTRACT_SIZE // (1024 * 1024)} MB limit)."
+        )
+
+
 def _read_zip(zip_path: str, password: str | None) -> Tuple[bytes, str]:
     """Open a ZIP file and return ``(data, filename)`` for the first entry.
 
@@ -537,7 +563,8 @@ def _read_zip(zip_path: str, password: str | None) -> Tuple[bytes, str]:
     to the standard library.
 
     Raises:
-        ValueError: On bad password, empty archive, or read errors.
+        ValueError: On bad password, empty archive, oversized entry, or
+            read errors.
     """
     if HAS_PYZIPPER and password:
         try:
@@ -546,6 +573,7 @@ def _read_zip(zip_path: str, password: str | None) -> Tuple[bytes, str]:
                 names = zf.namelist()
                 if not names:
                     raise ValueError("ZIP archive is empty")
+                _check_extract_size(zf.getinfo(names[0]))
                 return zf.read(names[0]), names[0]
         except RuntimeError as exc:
             if "Bad password" in str(exc):
@@ -558,6 +586,7 @@ def _read_zip(zip_path: str, password: str | None) -> Tuple[bytes, str]:
             raise ValueError("ZIP archive is empty")
         first = names[0]
         info  = zf.getinfo(first)
+        _check_extract_size(info)
         if info.flag_bits & 0x1:   # traditional encryption flag
             if not password:
                 raise ValueError("This file is password-protected. Please provide the password.")

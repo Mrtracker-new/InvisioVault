@@ -105,6 +105,24 @@ def _format_bytes(bytes_val: int) -> str:
     return f"{bytes_val / (1024 * 1024):.1f} MB"
 
 
+def _safe_download_name(original_filename: str) -> str:
+    """Sanitize an untrusted embedded filename for use as a download name.
+
+    ``secure_filename()`` strips path traversal and header-injection
+    characters, but returns '' for fully-hostile names like
+    '../../../etc/passwd'.  In that case fall back to 'extracted_file',
+    re-attaching the original extension when it is a harmless alnum
+    suffix so the browser can still pick a sensible handler.
+    """
+    safe = secure_filename(original_filename or '')
+    if safe:
+        return safe
+    ext = os.path.splitext(original_filename or '')[1].lstrip('.')
+    if ext.isalnum() and len(ext) <= 10:
+        return f'extracted_file.{ext.lower()}'
+    return 'extracted_file'
+
+
 @api.route('/health', methods=['GET'])
 @limiter.exempt
 def health_check():
@@ -328,7 +346,7 @@ def extract_file():
 
         # Sanitize filename from untrusted stego metadata to prevent
         # Content-Disposition header injection / path traversal (P0-03)
-        safe_filename = secure_filename(original_filename) or 'extracted_file'
+        safe_filename = _safe_download_name(original_filename)
         logger.info(f"Successfully extracted file: {safe_filename}")
         return send_file(
             output,
@@ -480,7 +498,7 @@ def extract_from_polyglot_file():
 
         # Sanitize filename from untrusted ZIP/polyglot metadata to prevent
         # Content-Disposition header injection / path traversal (P0-03)
-        safe_filename = secure_filename(original_filename) or 'extracted_file'
+        safe_filename = _safe_download_name(original_filename)
         logger.info(f"Successfully extracted from polyglot: {safe_filename}")
         return send_file(
             output,
