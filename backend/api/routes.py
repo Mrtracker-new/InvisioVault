@@ -131,6 +131,24 @@ def _safe_download_name(original_filename: str) -> str:
     return 'extracted_file'
 
 
+def _safe_upload_name(original_filename: str) -> str:
+    """Sanitize an untrusted upload filename for use on disk / as embedded metadata.
+
+    ``secure_filename()`` returns '' for fully-hostile names (all non-ASCII or
+    special chars, e.g. '...', '../../.txt', or CJK-only names).  A bare
+    ``{hex}_`` path with no extension then loses the file type when the name is
+    embedded and later re-served.  Fall back to a generic name, re-attaching a
+    harmless alnum extension when one is present.
+    """
+    safe = secure_filename(original_filename or '')
+    if safe:
+        return safe
+    ext = os.path.splitext(original_filename or '')[1].lstrip('.')
+    if ext.isalnum() and len(ext) <= 10:
+        return f'upload.{ext.lower()}'
+    return 'upload'
+
+
 @api.route('/health', methods=['GET'])
 @limiter.exempt
 def health_check():
@@ -252,7 +270,7 @@ def hide_file():
         else:
             # Validate and save uploaded file
             validate_hideable_file(file_to_hide)
-            file_filename = secure_filename(file_to_hide.filename)
+            file_filename = _safe_upload_name(file_to_hide.filename)
             file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{file_filename}")
             file_to_hide.save(file_path)
 
@@ -405,8 +423,8 @@ def create_polyglot_file():
         upload_folder = current_app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
         
-        carrier_filename = secure_filename(carrier_file.filename)
-        file_filename = secure_filename(file_to_hide.filename)
+        carrier_filename = _safe_upload_name(carrier_file.filename)
+        file_filename = _safe_upload_name(file_to_hide.filename)
         
         carrier_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{carrier_filename}")
         file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{file_filename}")
