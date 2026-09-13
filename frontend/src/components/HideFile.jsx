@@ -4,6 +4,16 @@ import axios from 'axios'
 import './HideFile.css'
 import API_URL from '../config/api'
 import CapacityIndicator from './CapacityIndicator'
+import FileDropzone from './FileDropzone'
+import StepProgress from './StepProgress'
+import ProcessingIndicator from './ProcessingIndicator'
+
+const STEPS = [
+  { id: 1, label: 'Carrier Image' },
+  { id: 2, label: 'Secret Payload' },
+  { id: 3, label: 'Security & Config' },
+  { id: 4, label: 'Generate & Download' }
+]
 
 function HideFile() {
   const [mode, setMode] = useState('file') // 'file' or 'text'
@@ -19,6 +29,14 @@ function HideFile() {
   const [downloadId, setDownloadId] = useState('')
 
   const MIN_PASSWORD_LENGTH = 8
+
+  const getCurrentStep = () => {
+    if (success || loading) return 4
+    const hasPayload = mode === 'file' ? !!file : !!text.trim()
+    if (image && hasPayload) return 3
+    if (image) return 2
+    return 1
+  }
 
   const getPasswordStrength = (pwd) => {
     if (!pwd) return null
@@ -96,13 +114,6 @@ function HideFile() {
       setFile(null)
       setText('')
       setPassword('')
-      // Reset file inputs
-      const imageInput = document.getElementById('image-input')
-      if (imageInput) imageInput.value = ''
-      if (mode === 'file') {
-        const fileInput = document.getElementById('file-input')
-        if (fileInput) fileInput.value = ''
-      }
     } catch (err) {
       setError(err.response?.data?.error || 'An error occurred while hiding the file')
     } finally {
@@ -119,6 +130,14 @@ function HideFile() {
     link.remove()
   }
 
+  const processingStages = [
+    'Analyzing carrier image structure...',
+    mode === 'file' ? 'Compressing payload...' : 'Encoding text payload...',
+    password ? 'Encrypting payload with Fernet (AES)...' : 'Preparing bitstream...',
+    'Embedding secret bits into LSB pixels...',
+    'Finalizing steganographic image...'
+  ]
+
   return (
     <div className="hide-file">
       <h2>Hide a File in an Image</h2>
@@ -126,49 +145,58 @@ function HideFile() {
         Upload an image and a file. The file will be securely hidden within the image using steganography.
       </p>
 
+      {/* Visual Step Progression */}
+      <StepProgress steps={STEPS} currentStep={getCurrentStep()} />
+
       {!success ? (
         <form onSubmit={handleSubmit}>
-          <div className="mode-selector">
+          <div className="mode-selector" role="tablist" aria-label="Payload type">
             <button
               type="button"
+              role="tab"
+              aria-selected={mode === 'file'}
               className={`mode-btn ${mode === 'file' ? 'active' : ''}`}
               onClick={() => setMode('file')}
             >
-              <FileText size={16} />
+              <FileText size={16} aria-hidden="true" />
               <span>Hide File</span>
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={mode === 'text'}
               className={`mode-btn ${mode === 'text' ? 'active' : ''}`}
               onClick={() => setMode('text')}
             >
-              <Type size={16} />
+              <Type size={16} aria-hidden="true" />
               <span>Hide Text</span>
             </button>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="image-input">Select Image (PNG, JPG, JPEG, BMP)</label>
-            <input
-              id="image-input"
-              type="file"
-              accept="image/png,image/jpeg,image/bmp"
-              onChange={(e) => setImage(e.target.files[0])}
-              required
-            />
-            {image && <p className="file-name">Selected: {image.name}</p>}
-          </div>
+          {/* Carrier Image Dropzone */}
+          <FileDropzone
+            id="carrier-image-input"
+            label="Carrier Image (PNG, JPG, JPEG, BMP)"
+            accept="image/png,image/jpeg,image/bmp"
+            file={image}
+            onFileSelect={(f) => { setImage(f); setError(''); }}
+            onClear={() => setImage(null)}
+            helperText="Drag & drop or browse from device (PNG, JPG, or BMP)"
+            required
+            disabled={loading}
+          />
 
           {mode === 'file' ? (
-            <div className="form-group">
-              <label htmlFor="file-input">Select File to Hide</label>
-              <input
-                id="file-input"
-                type="file"
-                onChange={(e) => setFile(e.target.files[0])}
-              />
-              {file && <p className="file-name">Selected: {file.name}</p>}
-            </div>
+            /* Secret File Dropzone */
+            <FileDropzone
+              id="secret-file-input"
+              label="Secret File to Hide"
+              file={file}
+              onFileSelect={(f) => { setFile(f); setError(''); }}
+              onClear={() => setFile(null)}
+              helperText="Any file type (documents, archives, keys, media)"
+              disabled={loading}
+            />
           ) : (
             <div className="form-group">
               <label htmlFor="text-input">Enter Text to Hide</label>
@@ -177,16 +205,17 @@ function HideFile() {
                 placeholder="Type your secret message here..."
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                rows="6"
+                rows="5"
+                disabled={loading}
               />
-              {text && <p className="file-name">Characters: {text.length}</p>}
+              {text && <p className="char-count">Characters: {text.length}</p>}
             </div>
           )}
 
           <div className="form-group">
             <label htmlFor="password-input" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
               <span>Password (Optional)</span>
-              <Lock size={14} style={{ opacity: 0.7 }} />
+              <Lock size={14} style={{ opacity: 0.7 }} aria-hidden="true" />
             </label>
             <div className="password-input-wrapper">
               <input
@@ -196,21 +225,24 @@ function HideFile() {
                 value={password}
                 onChange={handlePasswordChange}
                 aria-describedby={passwordError ? 'hide-password-error' : undefined}
+                disabled={loading}
               />
               {password && (
                 <button
                   type="button"
                   className="password-toggle"
                   onClick={() => setShowPassword(!showPassword)}
-                  aria-label="Toggle password visibility"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  disabled={loading}
                 >
                   {showPassword ? (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                       <circle cx="12" cy="12" r="3"></circle>
                     </svg>
                   ) : (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                       <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
                       <line x1="1" y1="1" x2="23" y2="23"></line>
                     </svg>
@@ -219,32 +251,32 @@ function HideFile() {
               )}
             </div>
             {passwordError && (
-              <p id="hide-password-error" className="password-error-msg" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+              <p id="hide-password-error" className="password-error-msg" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }} role="alert">
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} aria-hidden="true" />
                 <span>{passwordError}</span>
               </p>
             )}
             {password && !passwordError && (
-              <div className="password-strength">
+              <div className="password-strength" role="status" aria-live="polite">
                 <div className={`strength-bar strength-${getPasswordStrength(password)}`}>
                   <span></span><span></span><span></span>
                 </div>
                 <p className="file-name">
                   {getPasswordStrength(password) === 'strong' && (
                     <>
-                      <ShieldCheck size={14} />
+                      <ShieldCheck size={14} aria-hidden="true" />
                       <span>Strong password</span>
                     </>
                   )}
                   {getPasswordStrength(password) === 'medium' && (
                     <>
-                      <ShieldAlert size={14} />
+                      <ShieldAlert size={14} aria-hidden="true" />
                       <span>Medium strength — consider adding symbols or numbers</span>
                     </>
                   )}
                   {getPasswordStrength(password) === 'weak' && (
                     <>
-                      <ShieldX size={14} />
+                      <ShieldX size={14} aria-hidden="true" />
                       <span>Weak password</span>
                     </>
                   )}
@@ -253,7 +285,7 @@ function HideFile() {
             )}
             {password && !passwordError && (
               <p className="file-name">
-                <Lock size={14} />
+                <Lock size={14} aria-hidden="true" />
                 <span>File will be password-protected</span>
               </p>
             )}
@@ -270,24 +302,36 @@ function HideFile() {
             />
           )}
 
-          {error && <div className="error-message">{error}</div>}
+          {error && <div className="error-message" role="alert">{error}</div>}
 
-          <button type="submit" disabled={loading} className="submit-button">
-            {loading ? 'Processing...' : 'Hide File'}
+          {/* Staged Micro-Processing Indicator */}
+          <ProcessingIndicator
+            isActive={loading}
+            stages={processingStages}
+          />
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="submit-button"
+            aria-busy={loading}
+          >
+            {loading ? 'Hiding File...' : 'Hide File'}
           </button>
         </form>
       ) : (
         <div className="success-card">
           <div className="success-icon">
-            <CheckCircle2 size={48} strokeWidth={1.75} />
+            <CheckCircle2 size={48} strokeWidth={1.75} aria-hidden="true" />
           </div>
           <h3>File Hidden Successfully!</h3>
           <p>Your file has been securely hidden in the image.</p>
-          <button onClick={handleDownload} className="download-button">
-            <Download size={16} />
+          <button type="button" onClick={handleDownload} className="download-button">
+            <Download size={16} aria-hidden="true" />
             <span>Download Image</span>
           </button>
           <button
+            type="button"
             onClick={() => {
               setSuccess(false)
               setDownloadId('')

@@ -1,9 +1,18 @@
 import { useState } from 'react'
-import { CheckCircle2, Download, Lock, Info } from 'lucide-react'
+import { CheckCircle2, Download, Lock, Info, Copy, Check } from 'lucide-react'
 import axios from 'axios'
 import './ExtractFile.css'
 import API_URL from '../config/api'
 import { getApiErrorMessage } from '../utils/apiError'
+import FileDropzone from './FileDropzone'
+import StepProgress from './StepProgress'
+import ProcessingIndicator from './ProcessingIndicator'
+
+const STEPS = [
+  { id: 1, label: 'Select Stego Image' },
+  { id: 2, label: 'Security (Password)' },
+  { id: 3, label: 'Extract & Reveal' }
+]
 
 function ExtractFile() {
   const [image, setImage] = useState(null)
@@ -14,6 +23,13 @@ function ExtractFile() {
   const [successMessage, setSuccessMessage] = useState('')
   const [extractedText, setExtractedText] = useState('')
   const [extractedFilename, setExtractedFilename] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const getCurrentStep = () => {
+    if (extractedText || successMessage || loading) return 3
+    if (image) return 2
+    return 1
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -52,7 +68,7 @@ function ExtractFile() {
           filename = decodeURIComponent(filenameMatch[1].trim())
         }
       }
-      
+
       // Check if it's a text file
       if (filename.endsWith('.txt')) {
         // Display text content instead of downloading
@@ -75,8 +91,6 @@ function ExtractFile() {
 
       setImage(null)
       setPassword('')
-      const extractImgInput = document.getElementById('extract-image-input')
-      if (extractImgInput) extractImgInput.value = ''
     } catch (err) {
       // responseType is 'blob', so the error body is a Blob that must be
       // parsed to recover the server's message (e.g. "Incorrect password.")
@@ -98,6 +112,35 @@ function ExtractFile() {
     window.URL.revokeObjectURL(url)
   }
 
+  const handleCopyText = async () => {
+    if (!extractedText) return
+    try {
+      await navigator.clipboard.writeText(extractedText)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Fallback
+      const textArea = document.createElement('textarea')
+      textArea.value = extractedText
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const charCount = extractedText ? extractedText.length : 0
+  const wordCount = extractedText ? extractedText.trim().split(/\s+/).filter(Boolean).length : 0
+
+  const processingStages = [
+    'Reading carrier image headers...',
+    'Scanning LSB pixel bitstream...',
+    password ? 'Decrypting payload with password...' : 'Unpacking bitstream...',
+    'Extracting payload content...'
+  ]
+
   return (
     <div className="extract-file">
       <h2>Extract Hidden File from Image</h2>
@@ -105,22 +148,55 @@ function ExtractFile() {
         Upload an image that contains a hidden file. The file will be extracted and downloaded automatically.
       </p>
 
+      {/* Visual Step Progression */}
+      <StepProgress steps={STEPS} currentStep={getCurrentStep()} />
+
       {extractedText ? (
         <div className="text-display">
-          <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
-            <CheckCircle2 size={20} />
-            <span>Text Extracted Successfully!</span>
-          </h3>
-          <p className="filename">File: {extractedFilename}</p>
-          <div className="text-content">
-            <pre>{extractedText}</pre>
+          <div className="text-display-header">
+            <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+              <CheckCircle2 size={20} aria-hidden="true" />
+              <span>Text Extracted Successfully!</span>
+            </h3>
+            <div className="text-badges">
+              <span className="text-badge">{charCount} chars</span>
+              <span className="text-badge">{wordCount} words</span>
+            </div>
           </div>
+          <p className="filename">File: {extractedFilename}</p>
+
+          <div className="text-content-wrapper">
+            <div className="text-content">
+              <pre>{extractedText}</pre>
+            </div>
+            <button
+              type="button"
+              className="copy-text-btn"
+              onClick={handleCopyText}
+              title="Copy extracted text"
+              aria-label="Copy extracted text to clipboard"
+            >
+              {copied ? (
+                <>
+                  <Check size={16} aria-hidden="true" />
+                  <span>Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy size={16} aria-hidden="true" />
+                  <span>Copy</span>
+                </>
+              )}
+            </button>
+          </div>
+
           <div className="text-actions">
-            <button onClick={handleDownloadText} className="download-button">
-              <Download size={16} />
+            <button type="button" onClick={handleDownloadText} className="download-button">
+              <Download size={16} aria-hidden="true" />
               <span>Download as Text File</span>
             </button>
             <button
+              type="button"
               onClick={() => {
                 setExtractedText('')
                 setExtractedFilename('')
@@ -132,81 +208,94 @@ function ExtractFile() {
           </div>
         </div>
       ) : (
-
-      <form onSubmit={handleSubmit} aria-describedby={error ? 'extract-error-msg' : undefined}>
-        <div className="form-group">
-          <label htmlFor="extract-image-input">Select Image (PNG, JPG, JPEG, BMP)</label>
-          <input
+        <form onSubmit={handleSubmit} aria-describedby={error ? 'extract-error-msg' : undefined}>
+          <FileDropzone
             id="extract-image-input"
-            type="file"
+            label="Select Stego Image (PNG, JPG, JPEG, BMP)"
             accept="image/png,image/jpeg,image/bmp"
-            onChange={(e) => setImage(e.target.files[0])}
+            file={image}
+            onFileSelect={(f) => { setImage(f); setError(''); }}
+            onClear={() => setImage(null)}
+            helperText="Drag & drop or browse the carrier image containing the secret"
             required
+            disabled={loading}
           />
-          {image && <p className="file-name">Selected: {image.name}</p>}
-        </div>
 
-        <div className="form-group">
-          <label htmlFor="extract-password-input" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-            <span>Password (Optional)</span>
-            <Lock size={14} style={{ opacity: 0.7 }} />
-          </label>
-          <div className="password-input-wrapper">
-            <input
-              id="extract-password-input"
-              type={showPassword ? "text" : "password"}
-              placeholder="Enter password if the file was encrypted"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            {password && (
-              <button
-                type="button"
-                className="password-toggle"
-                onClick={() => setShowPassword(!showPassword)}
-                aria-label="Toggle password visibility"
-              >
-                {showPassword ? (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                  </svg>
-                )}
-              </button>
-            )}
+          <div className="form-group">
+            <label htmlFor="extract-password-input" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span>Password (Optional)</span>
+              <Lock size={14} style={{ opacity: 0.7 }} aria-hidden="true" />
+            </label>
+            <div className="password-input-wrapper">
+              <input
+                id="extract-password-input"
+                type={showPassword ? "text" : "password"}
+                placeholder="Enter password if the file was encrypted"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+              />
+              {password && (
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  disabled={loading}
+                >
+                  {showPassword ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                      <line x1="1" y1="1" x2="23" y2="23"></line>
+                    </svg>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
 
-        {successMessage && (
-          <div className="success-message" role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-            <span>{successMessage}</span>
+          {successMessage && (
+            <div className="success-message" role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <CheckCircle2 size={16} style={{ flexShrink: 0 }} aria-hidden="true" />
+              <span>{successMessage}</span>
+            </div>
+          )}
+          {error && <div id="extract-error-msg" className="error-message" role="alert">{error}</div>}
+
+          {/* Staged Micro-Processing Indicator */}
+          <ProcessingIndicator
+            isActive={loading}
+            stages={processingStages}
+          />
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="submit-button"
+            aria-busy={loading}
+          >
+            {loading ? 'Extracting File...' : 'Extract File'}
+          </button>
+
+          <div className="info-box">
+            <h4>
+              <Info size={16} aria-hidden="true" />
+              <span>How it works</span>
+            </h4>
+            <ul>
+              <li>Upload an image that was created using InvisioVault</li>
+              <li>The hidden file will be extracted with its original name</li>
+              <li>The file will download automatically to your device</li>
+              <li>Text files will be displayed on screen with quick copy</li>
+            </ul>
           </div>
-        )}
-        {error && <div id="extract-error-msg" className="error-message" role="alert">{error}</div>}
-
-        <button type="submit" disabled={loading} className="submit-button" aria-busy={loading}>
-          {loading ? 'Extracting...' : 'Extract File'}
-        </button>
-
-        <div className="info-box">
-          <h4>
-            <Info size={16} />
-            <span>How it works</span>
-          </h4>
-          <ul>
-            <li>Upload an image that was created using InvisioVault</li>
-            <li>The hidden file will be extracted with its original name</li>
-            <li>The file will download automatically to your device</li>
-            <li>Text files will be displayed on screen</li>
-          </ul>
-        </div>
-      </form>
+        </form>
       )}
     </div>
   )

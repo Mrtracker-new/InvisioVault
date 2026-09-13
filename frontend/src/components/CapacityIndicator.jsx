@@ -126,7 +126,7 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
 
                 // Calculate used bytes
                 const usedBytes = calculateUsedBytes(hiddenFile, hiddenText, !!password)
-                const percentage = Math.round((usedBytes / totalBytes) * 100)
+                const percentage = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 100
 
                 setCapacity({
                     totalBytes,
@@ -173,8 +173,8 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
 
     if (loading) {
         return (
-            <div className="capacity-indicator loading">
-                <div className="capacity-spinner"></div>
+            <div className="capacity-indicator loading" role="status" aria-live="polite">
+                <div className="capacity-spinner" aria-hidden="true"></div>
                 <p>Calculating capacity...</p>
             </div>
         )
@@ -182,9 +182,9 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
 
     if (error) {
         return (
-            <div className="capacity-indicator error">
+            <div className="capacity-indicator error" role="alert">
                 <p style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <AlertTriangle size={16} />
+                    <AlertTriangle size={16} aria-hidden="true" />
                     <span>{error}</span>
                 </p>
             </div>
@@ -202,7 +202,7 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
         <div className={`capacity-indicator ${status.level}`}>
             <div className="capacity-header">
                 <h4>
-                    <BarChart3 size={18} />
+                    <BarChart3 size={18} aria-hidden="true" />
                     <span>Capacity Analysis</span>
                 </h4>
             </div>
@@ -219,28 +219,36 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
             </div>
 
             <div className="progress-container">
-                <div className="progress-bar">
+                <div
+                    className="progress-bar"
+                    role="progressbar"
+                    aria-valuenow={Math.min(Math.max(capacity.percentage, 0), 100)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuetext={`${capacity.percentage}% capacity used`}
+                    aria-label="Image steganography capacity used"
+                >
                     <div
                         className={`progress-fill ${status.level}`}
                         style={{ width: `${progressWidth}%` }}
                     >
-                        <div className="progress-shine"></div>
+                        <div className="progress-shine" aria-hidden="true"></div>
                     </div>
                 </div>
-                <div className="progress-label">
+                <div className="progress-label" aria-hidden="true">
                     {capacity.percentage}% capacity used
                 </div>
             </div>
 
-            <div className={`status-message ${status.level}`}>
-                <span className="status-icon">{status.icon}</span>
+            <div className={`status-message ${status.level}`} role="status" aria-live="polite">
+                <span className="status-icon" aria-hidden="true">{status.icon}</span>
                 <span className="status-text">{status.message}</span>
             </div>
 
             {mode === 'stego' && (
                 <div className="capacity-note">
                     <small style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <Info size={14} style={{ flexShrink: 0 }} />
+                        <Info size={14} style={{ flexShrink: 0 }} aria-hidden="true" />
                         <span>
                             Capacity based on LSB steganography (3 bits per pixel).
                             {password && ' Encryption adds ~16 bytes overhead.'}
