@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import axios from 'axios'
 import './QRCode.css'
 import API_URL from '../config/api'
@@ -32,6 +32,7 @@ function QRCode() {
     const [extractLoading, setExtractLoading] = useState(false)
     const [extractError, setExtractError] = useState('')
     const [cameraError, setCameraError] = useState('')
+    const [copiedField, setCopiedField] = useState('')
 
     // Camera scanner with callbacks
     const isScanning = activeTab === 'extract' && scanMode === 'camera'
@@ -261,7 +262,8 @@ function QRCode() {
 
     const copyToClipboard = (text, type) => {
         navigator.clipboard.writeText(text)
-        alert(`${type} copied to clipboard!`)
+        setCopiedField(type)
+        setTimeout(() => setCopiedField(''), 2000)
     }
 
     return (
@@ -366,7 +368,7 @@ function QRCode() {
                                     <input
                                         id="logo-input"
                                         type="file"
-                                        accept="image/*"
+                                        accept="image/png,image/jpeg,image/bmp"
                                         onChange={(e) => setLogo(e.target.files[0])}
                                     />
                                     {logo && <p className="file-name">Logo: {logo.name}</p>}
@@ -392,7 +394,17 @@ function QRCode() {
                                             onClick={() => setShowPassword(!showPassword)}
                                             aria-label="Toggle password visibility"
                                         >
-                                            {showPassword ? '👁️' : '🙈'}
+                                            {showPassword ? (
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                    <circle cx="12" cy="12" r="3"></circle>
+                                                </svg>
+                                            ) : (
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                                    <line x1="1" y1="1" x2="23" y2="23"></line>
+                                                </svg>
+                                            )}
                                         </button>
                                     )}
                                 </div>
@@ -559,7 +571,17 @@ function QRCode() {
                                                     onClick={() => setShowExtractPassword(!showExtractPassword)}
                                                     aria-label="Toggle password visibility"
                                                 >
-                                                    {showExtractPassword ? '👁️' : '🙈'}
+                                                    {showExtractPassword ? (
+                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path>
+                                                            <circle cx="12" cy="12" r="3"></circle>
+                                                        </svg>
+                                                    ) : (
+                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                                                        </svg>
+                                                    )}
                                                 </button>
                                             )}
                                         </div>
@@ -573,7 +595,7 @@ function QRCode() {
                                         <input
                                             id="qr-upload"
                                             type="file"
-                                            accept="image/*"
+                                            accept="image/png,image/jpeg,image/bmp"
                                             onChange={(e) => setUploadedQR(e.target.files[0])}
                                             required
                                         />
@@ -597,7 +619,17 @@ function QRCode() {
                                                     onClick={() => setShowExtractPassword(!showExtractPassword)}
                                                     aria-label="Toggle password visibility"
                                                 >
-                                                    {showExtractPassword ? '👁️' : '🙈'}
+                                                    {showExtractPassword ? (
+                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path>
+                                                            <circle cx="12" cy="12" r="3"></circle>
+                                                        </svg>
+                                                    ) : (
+                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                                                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                                                        </svg>
+                                                    )}
                                                 </button>
                                             )}
                                         </div>
@@ -624,7 +656,7 @@ function QRCode() {
                                         className="copy-btn"
                                         onClick={() => copyToClipboard(extractedData.publicData, 'Public data')}
                                     >
-                                        📋 Copy
+                                        {copiedField === 'Public data' ? '✓ Copied!' : '📋 Copy'}
                                     </button>
                                 </div>
                             </div>
@@ -638,7 +670,7 @@ function QRCode() {
                                             className="copy-btn"
                                             onClick={() => copyToClipboard(extractedData.secretData, 'Secret data')}
                                         >
-                                            📋 Copy
+                                            {copiedField === 'Secret data' ? '✓ Copied!' : '📋 Copy'}
                                         </button>
                                     </div>
                                 </div>

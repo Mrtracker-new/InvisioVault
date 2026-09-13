@@ -40,11 +40,6 @@ function ExtractFile() {
         responseType: 'blob'
       })
 
-      // Create download link
-      const url = window.URL.createObjectURL(new Blob([response.data]))
-      const link = document.createElement('a')
-      link.href = url
-      
       // Get filename from Content-Disposition header
       const contentDisposition = response.headers['content-disposition']
       let filename = 'extracted_file.bin' // Default fallback with extension
@@ -65,6 +60,9 @@ function ExtractFile() {
         setExtractedFilename(filename)
       } else {
         // Download non-text files
+        const url = window.URL.createObjectURL(new Blob([response.data]))
+        const link = document.createElement('a')
+        link.href = url
         link.setAttribute('download', filename)
         document.body.appendChild(link)
         link.click()
@@ -129,7 +127,7 @@ function ExtractFile() {
         </div>
       ) : (
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} aria-describedby={error ? 'extract-error-msg' : undefined}>
         <div className="form-group">
           <label htmlFor="extract-image-input">Select Image (PNG, JPG, JPEG, BMP)</label>
           <input
@@ -175,10 +173,10 @@ function ExtractFile() {
           </div>
         </div>
 
-        {successMessage && <div className="success-message">{successMessage}</div>}
-        {error && <div className="error-message">{error}</div>}
+        {successMessage && <div className="success-message" role="status" aria-live="polite">{successMessage}</div>}
+        {error && <div id="extract-error-msg" className="error-message" role="alert">{error}</div>}
 
-        <button type="submit" disabled={loading} className="submit-button">
+        <button type="submit" disabled={loading} className="submit-button" aria-busy={loading}>
           {loading ? 'Extracting...' : 'Extract File'}
         </button>
 

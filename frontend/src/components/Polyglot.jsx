@@ -152,7 +152,8 @@ function Polyglot() {
   const handleDownload = () => {
     const link = document.createElement('a')
     link.href = `${API_URL}/api/polyglot/download/${downloadId}`
-    link.setAttribute('download', 'invisiovault_polyglot')
+    const ext = downloadId && downloadId.includes('.') ? downloadId.slice(downloadId.lastIndexOf('.')) : ''
+    link.setAttribute('download', `invisiovault_polyglot${ext}`)
     document.body.appendChild(link)
     link.click()
     link.remove()

@@ -40,8 +40,13 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
         // We'll estimate conservatively (assume 30% compression for safety)
         const estimatedCompressedSize = Math.ceil(dataSize * 0.7)
 
-        // Total size = overhead + metadata + compressed data
-        return overhead + metadataSize + estimatedCompressedSize
+        // Account for Fernet base64 token overhead (~1.35x compressed size) when encrypted
+        const estimatedPayloadSize = hasPassword
+            ? Math.ceil(estimatedCompressedSize * 1.35)
+            : estimatedCompressedSize
+
+        // Total size = overhead + metadata + payload data
+        return overhead + metadataSize + estimatedPayloadSize
     }
 
     // Format bytes to human-readable string

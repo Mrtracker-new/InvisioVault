@@ -29,23 +29,87 @@ export function useQRScanner(isActive, onQRDetected, onError) {
         onErrorRef.current = onError
     }, [onQRDetected, onError])
 
-    useEffect(() => {
-        console.log('[QR Scanner] Hook activated:', isActive)
+    const stopScanning = useCallback(() => {
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current)
+            animationFrameRef.current = null
+        }
 
-        if (!isActive) {
-            stopScanning()
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+        }
+
+        if (videoRef.current) {
+            videoRef.current.srcObject = null
+        }
+
+        setIsScanning(false)
+        setBoundingBox(null)
+    }, [])
+
+    const scanFrame = useCallback(() => {
+        const video = videoRef.current
+        const canvas = canvasRef.current
+
+        if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
+            animationFrameRef.current = requestAnimationFrame(scanFrame)
             return
         }
 
-        startScanning()
-
-        return () => {
-            console.log('[QR Scanner] Cleaning up...')
-            stopScanning()
+        const now = Date.now()
+        if (now - lastScanTimeRef.current < SCAN_INTERVAL) {
+            animationFrameRef.current = requestAnimationFrame(scanFrame)
+            return
         }
-    }, [isActive])
+        lastScanTimeRef.current = now
 
-    const startScanning = async () => {
+        try {
+            const ctx = canvas.getContext('2d', { willReadFrequently: true })
+
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                canvas.width = video.videoWidth
+                canvas.height = video.videoHeight
+            }
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "dontInvert",
+            })
+
+            if (code && !isProcessingRef.current) {
+                console.log('[QR Scanner] QR Code detected locally:', code.data)
+                setBoundingBox(code.location)
+
+                if (onQRDetectedRef.current) {
+                    isProcessingRef.current = true
+                    // Pass a wrapper so callers can access both the image blob
+                    // and the decoded QR string without mutating the native Blob object.
+                    canvas.toBlob((blob) => {
+                        if (blob) {
+                            Promise.resolve(onQRDetectedRef.current({ blob, rawQrData: code.data }))
+                                .finally(() => {
+                                    isProcessingRef.current = false
+                                })
+                        } else {
+                            isProcessingRef.current = false
+                        }
+                    })
+                }
+            } else if (!code) {
+                setBoundingBox(null)
+            }
+
+        } catch (err) {
+            console.error('[QR Scanner] Frame scan error:', err)
+        }
+
+        animationFrameRef.current = requestAnimationFrame(scanFrame)
+    }, [])
+
+    const startScanning = useCallback(async () => {
         try {
             console.log('[QR Scanner] Starting camera access...')
             setError(null)
@@ -108,87 +172,23 @@ export function useQRScanner(isActive, onQRDetected, onError) {
             setIsScanning(false)
             if (onErrorRef.current) onErrorRef.current(err)
         }
-    }
+    }, [scanFrame])
 
-    const scanFrame = () => {
-        const video = videoRef.current
-        const canvas = canvasRef.current
+    useEffect(() => {
+        console.log('[QR Scanner] Hook activated:', isActive)
 
-        if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
-            animationFrameRef.current = requestAnimationFrame(scanFrame)
+        if (!isActive) {
+            stopScanning()
             return
         }
 
-        const now = Date.now()
-        if (now - lastScanTimeRef.current < SCAN_INTERVAL) {
-            animationFrameRef.current = requestAnimationFrame(scanFrame)
-            return
+        startScanning()
+
+        return () => {
+            console.log('[QR Scanner] Cleaning up...')
+            stopScanning()
         }
-        lastScanTimeRef.current = now
-
-        try {
-            const ctx = canvas.getContext('2d', { willReadFrequently: true })
-
-            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-                canvas.width = video.videoWidth
-                canvas.height = video.videoHeight
-            }
-
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
-            })
-
-            if (code && !isProcessingRef.current) {
-                console.log('[QR Scanner] QR Code detected locally:', code.data)
-                setBoundingBox(code.location)
-
-                if (onQRDetectedRef.current) {
-                    isProcessingRef.current = true
-                    // Pass a wrapper so callers can access both the image blob
-                    // and the decoded QR string without mutating the native Blob object.
-                    canvas.toBlob((blob) => {
-                        if (blob) {
-                            Promise.resolve(onQRDetectedRef.current({ blob, rawQrData: code.data }))
-                                .finally(() => {
-                                    isProcessingRef.current = false
-                                })
-                        } else {
-                            isProcessingRef.current = false
-                        }
-                    })
-                }
-            } else if (!code) {
-                setBoundingBox(null)
-            }
-
-        } catch (err) {
-            console.error('[QR Scanner] Frame scan error:', err)
-        }
-
-        animationFrameRef.current = requestAnimationFrame(scanFrame)
-    }
-
-    const stopScanning = useCallback(() => {
-        if (animationFrameRef.current) {
-            cancelAnimationFrame(animationFrameRef.current)
-            animationFrameRef.current = null
-        }
-
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop())
-            streamRef.current = null
-        }
-
-        if (videoRef.current) {
-            videoRef.current.srcObject = null
-        }
-
-        setIsScanning(false)
-        setBoundingBox(null)
-    }, [])
+    }, [isActive, startScanning, stopScanning])
 
     const reset = () => {
         setError(null)
