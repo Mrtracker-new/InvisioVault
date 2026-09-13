@@ -198,6 +198,9 @@
 .status-icon {
   font-size: 1.25rem;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .status-text {

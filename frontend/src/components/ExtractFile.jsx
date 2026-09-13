@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CheckCircle2, Download, Lock, Info } from 'lucide-react'
 import axios from 'axios'
 import './ExtractFile.css'
 import API_URL from '../config/api'
@@ -68,13 +69,14 @@ function ExtractFile() {
         link.click()
         link.remove()
         window.URL.revokeObjectURL(url)
-        setSuccessMessage(`✅ "${filename}" extracted and downloaded successfully!`)
+        setSuccessMessage(`"${filename}" extracted and downloaded successfully!`)
         setTimeout(() => setSuccessMessage(''), 4000)
       }
 
       setImage(null)
       setPassword('')
-      document.getElementById('extract-image-input').value = ''
+      const extractImgInput = document.getElementById('extract-image-input')
+      if (extractImgInput) extractImgInput.value = ''
     } catch (err) {
       // responseType is 'blob', so the error body is a Blob that must be
       // parsed to recover the server's message (e.g. "Incorrect password.")
@@ -105,14 +107,18 @@ function ExtractFile() {
 
       {extractedText ? (
         <div className="text-display">
-          <h3>✅ Text Extracted Successfully!</h3>
+          <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+            <CheckCircle2 size={20} />
+            <span>Text Extracted Successfully!</span>
+          </h3>
           <p className="filename">File: {extractedFilename}</p>
           <div className="text-content">
             <pre>{extractedText}</pre>
           </div>
           <div className="text-actions">
             <button onClick={handleDownloadText} className="download-button">
-              📥 Download as Text File
+              <Download size={16} />
+              <span>Download as Text File</span>
             </button>
             <button
               onClick={() => {
@@ -141,7 +147,10 @@ function ExtractFile() {
         </div>
 
         <div className="form-group">
-          <label htmlFor="extract-password-input">Password (Optional) 🔒</label>
+          <label htmlFor="extract-password-input" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span>Password (Optional)</span>
+            <Lock size={14} style={{ opacity: 0.7 }} />
+          </label>
           <div className="password-input-wrapper">
             <input
               id="extract-password-input"
@@ -173,7 +182,12 @@ function ExtractFile() {
           </div>
         </div>
 
-        {successMessage && <div className="success-message" role="status" aria-live="polite">{successMessage}</div>}
+        {successMessage && (
+          <div className="success-message" role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+            <span>{successMessage}</span>
+          </div>
+        )}
         {error && <div id="extract-error-msg" className="error-message" role="alert">{error}</div>}
 
         <button type="submit" disabled={loading} className="submit-button" aria-busy={loading}>
@@ -181,7 +195,10 @@ function ExtractFile() {
         </button>
 
         <div className="info-box">
-          <h4>ℹ️ How it works</h4>
+          <h4>
+            <Info size={16} />
+            <span>How it works</span>
+          </h4>
           <ul>
             <li>Upload an image that was created using InvisioVault</li>
             <li>The hidden file will be extracted with its original name</li>

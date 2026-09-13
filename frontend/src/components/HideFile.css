@@ -34,6 +34,10 @@
 }
 
 .mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-6);
   background: transparent;
   border: 1px solid var(--border-subtle);
@@ -185,6 +189,10 @@
 .success-icon {
   font-size: 3rem;
   margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-success);
 }
 
 .success-card h3 {
@@ -211,6 +219,10 @@
 }
 
 .download-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
   background: var(--accent-success);
   color: #000;
   border: none;

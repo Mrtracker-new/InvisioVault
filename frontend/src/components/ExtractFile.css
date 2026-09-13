@@ -95,6 +95,10 @@
 
 /* Reusing basic button styles is good practice, or import them */
 .text-actions .download-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
   background: var(--accent-success);
   color: #000;
   border: none;

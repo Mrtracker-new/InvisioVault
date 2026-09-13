@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { FileText, Type, Lock, AlertTriangle, ShieldCheck, ShieldAlert, ShieldX, CheckCircle2, Download } from 'lucide-react'
 import axios from 'axios'
 import './HideFile.css'
 import API_URL from '../config/api'
@@ -96,9 +97,11 @@ function HideFile() {
       setText('')
       setPassword('')
       // Reset file inputs
-      document.getElementById('image-input').value = ''
+      const imageInput = document.getElementById('image-input')
+      if (imageInput) imageInput.value = ''
       if (mode === 'file') {
-        document.getElementById('file-input').value = ''
+        const fileInput = document.getElementById('file-input')
+        if (fileInput) fileInput.value = ''
       }
     } catch (err) {
       setError(err.response?.data?.error || 'An error occurred while hiding the file')
@@ -131,14 +134,16 @@ function HideFile() {
               className={`mode-btn ${mode === 'file' ? 'active' : ''}`}
               onClick={() => setMode('file')}
             >
-              📄 Hide File
+              <FileText size={16} />
+              <span>Hide File</span>
             </button>
             <button
               type="button"
               className={`mode-btn ${mode === 'text' ? 'active' : ''}`}
               onClick={() => setMode('text')}
             >
-              📝 Hide Text
+              <Type size={16} />
+              <span>Hide Text</span>
             </button>
           </div>
 
@@ -179,7 +184,10 @@ function HideFile() {
           )}
 
           <div className="form-group">
-            <label htmlFor="password-input">Password (Optional) 🔒</label>
+            <label htmlFor="password-input" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span>Password (Optional)</span>
+              <Lock size={14} style={{ opacity: 0.7 }} />
+            </label>
             <div className="password-input-wrapper">
               <input
                 id="password-input"
@@ -211,7 +219,10 @@ function HideFile() {
               )}
             </div>
             {passwordError && (
-              <p id="hide-password-error" className="password-error-msg">⚠️ {passwordError}</p>
+              <p id="hide-password-error" className="password-error-msg" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+                <span>{passwordError}</span>
+              </p>
             )}
             {password && !passwordError && (
               <div className="password-strength">
@@ -219,13 +230,33 @@ function HideFile() {
                   <span></span><span></span><span></span>
                 </div>
                 <p className="file-name">
-                  {getPasswordStrength(password) === 'strong' && '🔒 Strong password'}
-                  {getPasswordStrength(password) === 'medium' && '🔓 Medium strength — consider adding symbols or numbers'}
-                  {getPasswordStrength(password) === 'weak' && '⚠️ Weak password'}
+                  {getPasswordStrength(password) === 'strong' && (
+                    <>
+                      <ShieldCheck size={14} />
+                      <span>Strong password</span>
+                    </>
+                  )}
+                  {getPasswordStrength(password) === 'medium' && (
+                    <>
+                      <ShieldAlert size={14} />
+                      <span>Medium strength — consider adding symbols or numbers</span>
+                    </>
+                  )}
+                  {getPasswordStrength(password) === 'weak' && (
+                    <>
+                      <ShieldX size={14} />
+                      <span>Weak password</span>
+                    </>
+                  )}
                 </p>
               </div>
             )}
-            {password && !passwordError && <p className="file-name">🔐 File will be password-protected</p>}
+            {password && !passwordError && (
+              <p className="file-name">
+                <Lock size={14} />
+                <span>File will be password-protected</span>
+              </p>
+            )}
           </div>
 
           {/* Capacity Indicator */}
@@ -247,11 +278,14 @@ function HideFile() {
         </form>
       ) : (
         <div className="success-card">
-          <div className="success-icon">✅</div>
+          <div className="success-icon">
+            <CheckCircle2 size={48} strokeWidth={1.75} />
+          </div>
           <h3>File Hidden Successfully!</h3>
           <p>Your file has been securely hidden in the image.</p>
           <button onClick={handleDownload} className="download-button">
-            📥 Download Image
+            <Download size={16} />
+            <span>Download Image</span>
           </button>
           <button
             onClick={() => {

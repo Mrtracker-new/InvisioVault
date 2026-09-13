@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { AlertCircle, AlertTriangle, Activity, CheckCircle2, BarChart3, Info } from 'lucide-react'
 import axios from 'axios'
 import './CapacityIndicator.css'
 import API_URL from '../config/api'
@@ -65,25 +66,25 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
         if (percentage > 100) {
             return {
                 level: 'error',
-                icon: '❌',
+                icon: <AlertCircle size={18} />,
                 message: `${contentType} is too large for this image`
             }
         } else if (percentage > 90) {
             return {
                 level: 'warning',
-                icon: '⚠️',
+                icon: <AlertTriangle size={18} />,
                 message: `${contentType} will barely fit - consider using a larger image`
             }
         } else if (percentage > 70) {
             return {
                 level: 'caution',
-                icon: '⚡',
+                icon: <Activity size={18} />,
                 message: `${contentType} will fit, but capacity is high`
             }
         } else {
             return {
                 level: 'success',
-                icon: '✅',
+                icon: <CheckCircle2 size={18} />,
                 message: `${contentType} will fit comfortably`
             }
         }
@@ -182,7 +183,10 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
     if (error) {
         return (
             <div className="capacity-indicator error">
-                <p>⚠️ {error}</p>
+                <p style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <AlertTriangle size={16} />
+                    <span>{error}</span>
+                </p>
             </div>
         )
     }
@@ -197,7 +201,10 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
     return (
         <div className={`capacity-indicator ${status.level}`}>
             <div className="capacity-header">
-                <h4>📊 Capacity Analysis</h4>
+                <h4>
+                    <BarChart3 size={18} />
+                    <span>Capacity Analysis</span>
+                </h4>
             </div>
 
             <div className="capacity-stats">
@@ -232,9 +239,12 @@ function CapacityIndicator({ carrierFile, hiddenFile, hiddenText, mode = 'stego'
 
             {mode === 'stego' && (
                 <div className="capacity-note">
-                    <small>
-                        ℹ️ Capacity based on LSB steganography (3 bits per pixel).
-                        {password && ' Encryption adds ~16 bytes overhead.'}
+                    <small style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Info size={14} style={{ flexShrink: 0 }} />
+                        <span>
+                            Capacity based on LSB steganography (3 bits per pixel).
+                            {password && ' Encryption adds ~16 bytes overhead.'}
+                        </span>
                     </small>
                 </div>
             )}
