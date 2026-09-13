@@ -411,8 +411,11 @@
     right: var(--space-3);
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: var(--space-1-5, 6px);
     padding: var(--space-2) var(--space-3);
+    min-height: var(--touch-target-min, 44px);
+    min-width: 44px;
     background: var(--bg-page);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
@@ -427,6 +430,11 @@
     background: var(--bg-elevated);
     border-color: var(--text-primary);
     color: var(--text-primary);
+}
+
+.copy-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
 }
 
 /* Error Message */
@@ -639,4 +647,53 @@
 .strength-bar.strength-strong span:nth-child(2),
 .strength-bar.strength-strong span:nth-child(3) {
     background: var(--accent-success);
+}
+
+/* Responsive Camera & Scanner Optimizations */
+@media (max-width: 640px) {
+    .camera-container {
+        aspect-ratio: 1 / 1;
+        max-height: 280px;
+    }
+
+    .scan-frame {
+        width: 180px;
+        height: 180px;
+    }
+}
+
+/* Small screen (<380px) touch and layout optimizations */
+@media (max-width: 380px) {
+    .tab-container-qr {
+        gap: var(--space-2);
+    }
+
+    .tab-qr {
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--text-xs);
+    }
+
+    .scan-mode-toggle {
+        gap: var(--space-2);
+    }
+
+    .scan-mode-toggle .mode-btn {
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--text-xs);
+    }
+
+    .customization-section {
+        padding: var(--space-4);
+    }
+}
+
+/* Focus-visible states for QR elements */
+.tab-qr:focus-visible,
+.scan-mode-toggle .mode-btn:focus-visible,
+.download-button:focus-visible,
+.new-button:focus-visible,
+.submit-button:focus-visible,
+.password-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
 }

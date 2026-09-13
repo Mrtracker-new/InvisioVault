@@ -4,6 +4,22 @@ import axios from 'axios'
 import './QRCode.css'
 import API_URL from '../config/api'
 import { useQRScanner } from '../hooks/useQRScanner'
+import FileDropzone from './FileDropzone'
+import StepProgress from './StepProgress'
+import ProcessingIndicator from './ProcessingIndicator'
+
+const QR_GENERATE_STEPS = [
+    { id: 1, label: 'Public Data' },
+    { id: 2, label: 'Secret Payload' },
+    { id: 3, label: 'Customization & Security' },
+    { id: 4, label: 'Generate & Download' }
+]
+
+const QR_EXTRACT_STEPS = [
+    { id: 1, label: 'Scan Method' },
+    { id: 2, label: 'Security (Password)' },
+    { id: 3, label: 'Scan & Results' }
+]
 
 function QRCode() {
     const [activeTab, setActiveTab] = useState('generate') // 'generate' or 'extract'
@@ -256,6 +272,9 @@ function QRCode() {
         setExtractError('')
         setCameraError('')
         resetScanner()
+        if (document.getElementById('uploaded-qr-input')) {
+            document.getElementById('uploaded-qr-input').value = ''
+        }
         if (document.getElementById('qr-upload')) {
             document.getElementById('qr-upload').value = ''
         }
@@ -267,35 +286,72 @@ function QRCode() {
         setTimeout(() => setCopiedField(''), 2000)
     }
 
+    const getGenerateStep = () => {
+        if (success || loading) return 4
+        if (publicData && secretText) return 3
+        if (publicData) return 2
+        return 1
+    }
+
+    const getExtractStep = () => {
+        if (extractedData || extractLoading) return 3
+        if (scanMode === 'upload' && uploadedQR) return 2
+        if (scanMode === 'camera' && cameraActive) return 2
+        return 1
+    }
+
+    const qrGenStages = [
+        'Generating primary QR matrix...',
+        'Encoding hidden steganographic payload...',
+        logo ? 'Embedding centered logo watermark...' : 'Applying color matrices...',
+        'Finalizing customized QR code...'
+    ]
+
+    const qrExtractStages = [
+        'Detecting QR matrix patterns...',
+        'Decoding public primary text...',
+        extractPassword ? 'Decrypting embedded secret with password...' : 'Extracting hidden stego payload...',
+        'Validating extracted data...'
+    ]
+
     return (
         <div className="qr-code">
             <h2 style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                <QrCode size={22} />
+                <QrCode size={22} aria-hidden="true" />
                 <span>QR Code Steganography</span>
             </h2>
             <p className="description">
                 Generate customized QR codes with hidden messages, or scan to reveal secrets
             </p>
 
-            <div className="tab-container-qr">
+            <div className="tab-container-qr" role="tablist" aria-label="QR Code Mode">
                 <button
+                    id="qr-tab-generate"
+                    role="tab"
+                    aria-selected={activeTab === 'generate'}
+                    aria-controls="qr-panel-generate"
                     className={`tab-qr ${activeTab === 'generate' ? 'active' : ''}`}
                     onClick={() => { setActiveTab('generate'); setError(''); setExtractError(''); }}
                 >
-                    <Sparkles size={16} />
+                    <Sparkles size={16} aria-hidden="true" />
                     <span>Generate</span>
                 </button>
                 <button
+                    id="qr-tab-extract"
+                    role="tab"
+                    aria-selected={activeTab === 'extract'}
+                    aria-controls="qr-panel-extract"
                     className={`tab-qr ${activeTab === 'extract' ? 'active' : ''}`}
                     onClick={() => { setActiveTab('extract'); setError(''); setExtractError(''); }}
                 >
-                    <ScanLine size={16} />
+                    <ScanLine size={16} aria-hidden="true" />
                     <span>Scan & Extract</span>
                 </button>
             </div>
 
             {activeTab === 'generate' ? (
-                <div className="qr-generate">
+                <div id="qr-panel-generate" role="tabpanel" aria-labelledby="qr-tab-generate" className="qr-generate">
+                    <StepProgress steps={QR_GENERATE_STEPS} currentStep={getGenerateStep()} />
                     {!success ? (
                         <form onSubmit={handleGenerate}>
                             <div className="form-group">
@@ -360,7 +416,7 @@ function QRCode() {
                                 </div>
 
                                 <div className="form-group">
-                                    <label htmlFor="scale">Size: {scale}</label>
+                                    <label htmlFor="scale">Size Scale: {scale} ({scale * 15}×{scale * 15} px)</label>
                                     <input
                                         id="scale"
                                         type="range"
@@ -368,27 +424,33 @@ function QRCode() {
                                         max="20"
                                         value={scale}
                                         onChange={(e) => setScale(parseInt(e.target.value))}
+                                        aria-label="QR Code Size Scale"
+                                        aria-valuemin="5"
+                                        aria-valuemax="20"
+                                        aria-valuenow={scale}
+                                        aria-valuetext={`Scale size ${scale}`}
+                                        disabled={loading}
                                     />
                                     <small>Adjust the QR code size (larger = higher capacity)</small>
                                 </div>
 
-                                <div className="form-group">
-                                    <label htmlFor="logo-input">Logo (Optional)</label>
-                                    <input
-                                        id="logo-input"
-                                        type="file"
-                                        accept="image/png,image/jpeg,image/bmp"
-                                        onChange={(e) => setLogo(e.target.files[0])}
-                                    />
-                                    {logo && <p className="file-name">Logo: {logo.name}</p>}
-                                    <small>Add a logo in the center of your QR code</small>
-                                </div>
+                                <FileDropzone
+                                    id="logo-input"
+                                    label="Logo (Optional)"
+                                    accept="image/png,image/jpeg,image/bmp"
+                                    file={logo}
+                                    onFileSelect={setLogo}
+                                    onClear={() => setLogo(null)}
+                                    helperText="Add a logo in the center of your QR code"
+                                    compact
+                                    disabled={loading}
+                                />
                             </div>
 
                             <div className="form-group">
                                 <label htmlFor="password-input" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
                                     <span>Password (Optional)</span>
-                                    <Lock size={14} style={{ opacity: 0.7 }} />
+                                    <Lock size={14} style={{ opacity: 0.7 }} aria-hidden="true" />
                                 </label>
                                 <div className="password-input-wrapper">
                                     <input
@@ -398,21 +460,24 @@ function QRCode() {
                                         value={password}
                                         onChange={handlePasswordChange}
                                         aria-describedby={passwordError ? 'qr-password-error' : undefined}
+                                        disabled={loading}
                                     />
                                     {password && (
                                         <button
                                             type="button"
                                             className="password-toggle"
                                             onClick={() => setShowPassword(!showPassword)}
-                                            aria-label="Toggle password visibility"
+                                            aria-label={showPassword ? "Hide password" : "Show password"}
+                                            aria-pressed={showPassword}
+                                            disabled={loading}
                                         >
                                             {showPassword ? (
-                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                                                     <circle cx="12" cy="12" r="3"></circle>
                                                 </svg>
                                             ) : (
-                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                                     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
                                                     <line x1="1" y1="1" x2="23" y2="23"></line>
                                                 </svg>
@@ -421,32 +486,32 @@ function QRCode() {
                                     )}
                                 </div>
                                 {passwordError && (
-                                    <p id="qr-password-error" className="password-error-msg" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                        <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+                                    <p id="qr-password-error" className="password-error-msg" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }} role="alert">
+                                        <AlertTriangle size={14} style={{ flexShrink: 0 }} aria-hidden="true" />
                                         <span>{passwordError}</span>
                                     </p>
                                 )}
                                 {password && !passwordError && (
-                                    <div className="password-strength">
+                                    <div className="password-strength" role="status" aria-live="polite">
                                         <div className={`strength-bar strength-${getPasswordStrength(password)}`}>
                                             <span></span><span></span><span></span>
                                         </div>
                                         <p className="file-name">
                                             {getPasswordStrength(password) === 'strong' && (
                                                 <>
-                                                    <ShieldCheck size={14} />
+                                                    <ShieldCheck size={14} aria-hidden="true" />
                                                     <span>Strong password</span>
                                                 </>
                                             )}
                                             {getPasswordStrength(password) === 'medium' && (
                                                 <>
-                                                    <ShieldAlert size={14} />
+                                                    <ShieldAlert size={14} aria-hidden="true" />
                                                     <span>Medium strength — consider adding symbols or numbers</span>
                                                 </>
                                             )}
                                             {getPasswordStrength(password) === 'weak' && (
                                                 <>
-                                                    <ShieldX size={14} />
+                                                    <ShieldX size={14} aria-hidden="true" />
                                                     <span>Weak password</span>
                                                 </>
                                             )}
@@ -455,18 +520,29 @@ function QRCode() {
                                 )}
                                 {password && !passwordError && (
                                     <p className="file-name">
-                                        <Lock size={14} />
+                                        <Lock size={14} aria-hidden="true" />
                                         <span>Secret will be password-protected</span>
                                     </p>
                                 )}
                             </div>
 
-                            {error && <div className="error-message">{error}</div>}
+                            {error && <div className="error-message" role="alert">{error}</div>}
 
-                            <button type="submit" disabled={loading} className="submit-button" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                                {loading ? 'Generating...' : (
+                            <ProcessingIndicator
+                                isActive={loading}
+                                stages={qrGenStages}
+                            />
+
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="submit-button"
+                                aria-busy={loading}
+                                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                            >
+                                {loading ? 'Generating QR Code...' : (
                                     <>
-                                        <Sparkles size={16} />
+                                        <Sparkles size={16} aria-hidden="true" />
                                         <span>Generate QR Code</span>
                                     </>
                                 )}
@@ -493,40 +569,51 @@ function QRCode() {
                                     </div>
                                 </div>
                             )}
-                            <button onClick={handleDownload} className="download-button">
-                                <Download size={16} />
+                            <button type="button" onClick={handleDownload} className="download-button">
+                                <Download size={16} aria-hidden="true" />
                                 <span>Download QR Code</span>
                             </button>
-                            <button onClick={resetGenerate} className="new-button">
+                            <button type="button" onClick={resetGenerate} className="new-button">
                                 Create Another QR Code
                             </button>
                         </div>
                     )}
                 </div>
             ) : (
-                <div className="qr-extract">
+                <div id="qr-panel-extract" role="tabpanel" aria-labelledby="qr-tab-extract" className="qr-extract">
+                    <StepProgress steps={QR_EXTRACT_STEPS} currentStep={getExtractStep()} />
                     {!extractedData ? (
                         <div>
                             {/* Scan Mode Toggle */}
-                            <div className="scan-mode-toggle">
+                            <div className="scan-mode-toggle" role="tablist" aria-label="Scan Mode">
                                 <button
+                                    id="scan-tab-camera"
+                                    role="tab"
+                                    aria-selected={scanMode === 'camera'}
+                                    aria-controls="scan-panel-camera"
+                                    type="button"
                                     className={`mode-btn ${scanMode === 'camera' ? 'active' : ''}`}
                                     onClick={() => setScanMode('camera')}
                                 >
-                                    <Camera size={16} />
+                                    <Camera size={16} aria-hidden="true" />
                                     <span>Camera Scan</span>
                                 </button>
                                 <button
+                                    id="scan-tab-upload"
+                                    role="tab"
+                                    aria-selected={scanMode === 'upload'}
+                                    aria-controls="scan-panel-upload"
+                                    type="button"
                                     className={`mode-btn ${scanMode === 'upload' ? 'active' : ''}`}
                                     onClick={() => setScanMode('upload')}
                                 >
-                                    <Upload size={16} />
+                                    <Upload size={16} aria-hidden="true" />
                                     <span>Upload Image</span>
                                 </button>
                             </div>
 
                             {scanMode === 'camera' ? (
-                                <div className="camera-scanner">
+                                <div id="scan-panel-camera" role="tabpanel" aria-labelledby="scan-tab-camera" className="camera-scanner">
                                     <div className="camera-container">
                                         <video ref={videoRef} autoPlay playsInline muted allow="camera" className="camera-video" />
                                         <canvas ref={canvasRef} style={{ display: 'none' }} />
@@ -577,7 +664,7 @@ function QRCode() {
                                     </div>
 
                                     {(scanError || cameraError) && (
-                                        <div className="error-message" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                                        <div className="error-message" role="alert" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
                                             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                 <AlertCircle size={16} />
                                                 <span>{cameraError || scanError}</span>
@@ -615,7 +702,7 @@ function QRCode() {
                                     )}
 
                                     {extractError && !scanError && !cameraError && (
-                                        <div className="error-message">{extractError}</div>
+                                        <div className="error-message" role="alert">{extractError}</div>
                                     )}
 
                                     {/* Password input for camera mode */}
@@ -634,15 +721,16 @@ function QRCode() {
                                                     type="button"
                                                     className="password-toggle"
                                                     onClick={() => setShowExtractPassword(!showExtractPassword)}
-                                                    aria-label="Toggle password visibility"
+                                                    aria-label={showExtractPassword ? "Hide password" : "Show password"}
+                                                    aria-pressed={showExtractPassword}
                                                 >
                                                     {showExtractPassword ? (
-                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path>
                                                             <circle cx="12" cy="12" r="3"></circle>
                                                         </svg>
                                                     ) : (
-                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                                             <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
                                                             <line x1="1" y1="1" x2="23" y2="23"></line>
                                                         </svg>
@@ -654,17 +742,19 @@ function QRCode() {
                                     </div>
                                 </div>
                             ) : (
-                                <form onSubmit={handleExtract}>
+                                <form id="scan-panel-upload" role="tabpanel" aria-labelledby="scan-tab-upload" onSubmit={handleExtract}>
                                     <div className="form-group">
-                                        <label htmlFor="qr-upload">Upload QR Code Image</label>
-                                        <input
-                                            id="qr-upload"
-                                            type="file"
+                                        <FileDropzone
+                                            id="uploaded-qr-input"
+                                            label="Upload QR Code Image"
                                             accept="image/png,image/jpeg,image/bmp"
-                                            onChange={(e) => setUploadedQR(e.target.files[0])}
+                                            file={uploadedQR}
+                                            onFileSelect={(f) => { setUploadedQR(f); setExtractError(''); }}
+                                            onClear={() => setUploadedQR(null)}
+                                            helperText="Select or drag a saved QR code image to extract hidden secret"
                                             required
+                                            disabled={extractLoading}
                                         />
-                                        {uploadedQR && <p className="file-name">Selected: {uploadedQR.name}</p>}
                                     </div>
 
                                     <div className="form-group">
@@ -682,15 +772,16 @@ function QRCode() {
                                                     type="button"
                                                     className="password-toggle"
                                                     onClick={() => setShowExtractPassword(!showExtractPassword)}
-                                                    aria-label="Toggle password visibility"
+                                                    aria-label={showExtractPassword ? "Hide password" : "Show password"}
+                                                    aria-pressed={showExtractPassword}
                                                 >
                                                     {showExtractPassword ? (
-                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path>
                                                             <circle cx="12" cy="12" r="3"></circle>
                                                         </svg>
                                                     ) : (
-                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                                             <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
                                                             <line x1="1" y1="1" x2="23" y2="23"></line>
                                                         </svg>
@@ -700,16 +791,24 @@ function QRCode() {
                                         </div>
                                     </div>
 
-                                    {extractError && <div className="error-message">{extractError}</div>}
+                                    {extractError && <div className="error-message" role="alert">{extractError}</div>}
 
-                                    <button type="submit" disabled={extractLoading} className="submit-button" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                                        {extractLoading ? 'Scanning...' : (
-                                            <>
-                                                <ScanLine size={16} />
-                                                <span>Scan & Extract</span>
-                                            </>
-                                        )}
-                                    </button>
+                                    <ProcessingIndicator
+                                        isActive={extractLoading}
+                                        stages={qrExtractStages}
+                                    />
+
+                                    {!extractLoading && (
+                                        <button
+                                            type="submit"
+                                            disabled={extractLoading || !uploadedQR}
+                                            className="submit-button"
+                                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                                        >
+                                            <ScanLine size={16} />
+                                            <span>Scan & Extract</span>
+                                        </button>
+                                    )}
                                 </form>
                             )}
                         </div>
@@ -728,8 +827,10 @@ function QRCode() {
                                 <div className="data-box">
                                     <p>{extractedData.publicData}</p>
                                     <button
+                                        type="button"
                                         className="copy-btn"
                                         onClick={() => copyToClipboard(extractedData.publicData, 'Public data')}
+                                        aria-label="Copy public data to clipboard"
                                     >
                                         {copiedField === 'Public data' ? (
                                             <>
@@ -755,8 +856,10 @@ function QRCode() {
                                     <div className="data-box secret">
                                         <p>{extractedData.secretData}</p>
                                         <button
+                                            type="button"
                                             className="copy-btn"
                                             onClick={() => copyToClipboard(extractedData.secretData, 'Secret data')}
+                                            aria-label="Copy secret message to clipboard"
                                         >
                                             {copiedField === 'Secret data' ? (
                                                 <>
@@ -790,7 +893,7 @@ function QRCode() {
                                 </div>
                             )}
 
-                            <button onClick={resetExtract} className="new-button">
+                            <button type="button" onClick={resetExtract} className="new-button">
                                 Scan Another QR Code
                             </button>
                         </div>
