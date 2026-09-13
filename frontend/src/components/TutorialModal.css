@@ -182,7 +182,10 @@
 }
 
 .tm-tab-icon {
-  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   line-height: 1;
 }
 
@@ -377,10 +380,12 @@
 }
 
 .tm-tip-icon {
-  font-size: 20px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   margin-top: 2px;
+  color: var(--text-primary);
 }
 
 .tm-tip-body {
@@ -416,9 +421,11 @@
 }
 
 .tm-footer-icon {
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  opacity: 0.8;
+  color: var(--text-secondary);
 }
 
 .tm-footer p {

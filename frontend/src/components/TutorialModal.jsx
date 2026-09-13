@@ -1,11 +1,23 @@
 import { useState, useEffect, useCallback } from 'react'
+import {
+  Image as ImageIcon,
+  Layers,
+  QrCode,
+  Shield,
+  KeyRound,
+  ShieldAlert,
+  CheckCheck,
+  Maximize2,
+  X,
+  ShieldCheck,
+} from 'lucide-react'
 import './TutorialModal.css'
 
 const TABS = [
-  { id: 'stego', label: 'Steganography', icon: '🖼️' },
-  { id: 'polyglot', label: 'Polyglot', icon: '🔗' },
-  { id: 'qr', label: 'QR Stego', icon: '📱' },
-  { id: 'security', label: 'Security', icon: '🔒' },
+  { id: 'stego', label: 'Steganography', icon: ImageIcon },
+  { id: 'polyglot', label: 'Polyglot', icon: Layers },
+  { id: 'qr', label: 'QR Stego', icon: QrCode },
+  { id: 'security', label: 'Security', icon: Shield },
 ]
 
 const STEGO_HIDE_STEPS = [
@@ -44,10 +56,10 @@ const QR_EXTRACT_STEPS = [
 ]
 
 const SECURITY_TIPS = [
-  { icon: '🔑', title: 'Use Strong Passwords', desc: 'Combine uppercase, lowercase, numbers, and symbols. Longer is stronger.' },
-  { icon: '🛡️', title: 'Guard Your Images', desc: 'Anyone with both the stego image and the password can extract the hidden data.' },
-  { icon: '🧪', title: 'Test Before Sending', desc: 'Always do a round-trip test — hide then extract — before sending to anyone.' },
-  { icon: '📐', title: 'Use High-Resolution Covers', desc: 'Larger images have more pixel capacity, making hidden data harder to detect statistically.' },
+  { icon: KeyRound, title: 'Use Strong Passwords', desc: 'Combine uppercase, lowercase, numbers, and symbols. Longer is stronger.' },
+  { icon: ShieldAlert, title: 'Guard Your Images', desc: 'Anyone with both the stego image and the password can extract the hidden data.' },
+  { icon: CheckCheck, title: 'Test Before Sending', desc: 'Always do a round-trip test — hide then extract — before sending to anyone.' },
+  { icon: Maximize2, title: 'Use High-Resolution Covers', desc: 'Larger images have more pixel capacity, making hidden data harder to detect statistically.' },
 ]
 
 function StepCard({ num, title, desc }) {
@@ -63,9 +75,10 @@ function StepCard({ num, title, desc }) {
 }
 
 function TipCard({ icon, title, desc }) {
+  const Icon = icon
   return (
     <div className="tm-tip-card">
-      <span className="tm-tip-icon" aria-hidden="true">{icon}</span>
+      <span className="tm-tip-icon" aria-hidden="true"><Icon size={18} /></span>
       <div className="tm-tip-body">
         <p className="tm-tip-title">{title}</p>
         <p className="tm-tip-desc">{desc}</p>
@@ -120,26 +133,29 @@ function TutorialModal({ isOpen, onClose }) {
             onClick={onClose}
             aria-label="Close tutorial"
           >
-            ✕
+            <X size={16} />
           </button>
         </div>
 
         {/* Tab Bar */}
         <div className="tm-tab-bar" role="tablist" aria-label="Tutorial sections">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              aria-controls={`tm-panel-${tab.id}`}
-              id={`tm-tab-${tab.id}`}
-              className={`tm-tab ${activeTab === tab.id ? 'tm-tab--active' : ''}`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span className="tm-tab-icon" aria-hidden="true">{tab.icon}</span>
-              <span className="tm-tab-label">{tab.label}</span>
-            </button>
-          ))}
+          {TABS.map((tab) => {
+            const TabIcon = tab.icon
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                aria-controls={`tm-panel-${tab.id}`}
+                id={`tm-tab-${tab.id}`}
+                className={`tm-tab ${activeTab === tab.id ? 'tm-tab--active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span className="tm-tab-icon" aria-hidden="true"><TabIcon size={16} /></span>
+                <span className="tm-tab-label">{tab.label}</span>
+              </button>
+            )
+          })}
         </div>
 
         {/* Tab Content */}
@@ -271,7 +287,7 @@ function TutorialModal({ isOpen, onClose }) {
 
         {/* Footer Note */}
         <div className="tm-footer">
-          <span className="tm-footer-icon" aria-hidden="true">🔐</span>
+          <span className="tm-footer-icon" aria-hidden="true"><ShieldCheck size={16} /></span>
           <p>All processing happens locally — your files are <strong>never stored permanently</strong>.</p>
         </div>
       </div>
