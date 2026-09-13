@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Layers, PackagePlus, FolderDown, Lock, AlertTriangle, ShieldCheck, ShieldAlert, ShieldX, BarChart3, Info, CheckCircle2, Download } from 'lucide-react'
 import axios from 'axios'
 import './Polyglot.css'
 import API_URL from '../config/api'
@@ -80,8 +81,10 @@ function Polyglot() {
       setCarrierFile(null)
       setFileToHide(null)
       setPassword('')
-      document.getElementById('carrier-input').value = ''
-      document.getElementById('hide-input').value = ''
+      const carrierInput = document.getElementById('carrier-input')
+      if (carrierInput) carrierInput.value = ''
+      const hideInput = document.getElementById('hide-input')
+      if (hideInput) hideInput.value = ''
     } catch (err) {
       setError(err.response?.data?.error || 'An error occurred while creating the polyglot file')
     } finally {
@@ -137,8 +140,9 @@ function Polyglot() {
 
       setPolyglotFile(null)
       setPassword('')
-      document.getElementById('polyglot-input').value = ''
-      setExtractSuccess('✅ File extracted and downloaded successfully!')
+      const polyglotInput = document.getElementById('polyglot-input')
+      if (polyglotInput) polyglotInput.value = ''
+      setExtractSuccess('File extracted and downloaded successfully!')
       setTimeout(() => setExtractSuccess(''), 4000)
     } catch (err) {
       // responseType is 'blob', so the error body is a Blob that must be
@@ -161,7 +165,10 @@ function Polyglot() {
 
   return (
     <div className="polyglot">
-      <h2>🔗 Polyglot File Hiding</h2>
+      <h2>
+        <Layers size={22} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '8px' }} />
+        <span>Polyglot File Hiding</span>
+      </h2>
       <p className="description">
         Create polyglot files by appending hidden data to any carrier file. The carrier file remains functional while hiding your secret data.
       </p>
@@ -172,14 +179,16 @@ function Polyglot() {
           className={`mode-btn ${mode === 'create' ? 'active' : ''}`}
           onClick={() => { setMode('create'); setError(''); setSuccess(false); }}
         >
-          📦 Create Polyglot
+          <PackagePlus size={16} />
+          <span>Create Polyglot</span>
         </button>
         <button
           type="button"
           className={`mode-btn ${mode === 'extract' ? 'active' : ''}`}
           onClick={() => { setMode('extract'); setError(''); setSuccess(false); }}
         >
-          📂 Extract from Polyglot
+          <FolderDown size={16} />
+          <span>Extract from Polyglot</span>
         </button>
       </div>
 
@@ -209,7 +218,10 @@ function Polyglot() {
             </div>
 
               <div className="form-group">
-              <label htmlFor="polyglot-password-input">Password (Optional) 🔒</label>
+              <label htmlFor="polyglot-password-input" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span>Password (Optional)</span>
+                <Lock size={14} style={{ opacity: 0.7 }} />
+              </label>
               <div className="password-input-wrapper">
                 <input
                   id="polyglot-password-input"
@@ -241,7 +253,10 @@ function Polyglot() {
                 )}
               </div>
               {passwordError && (
-                <p id="polyglot-password-error" className="password-error-msg">⚠️ {passwordError}</p>
+                <p id="polyglot-password-error" className="password-error-msg" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+                  <span>{passwordError}</span>
+                </p>
               )}
               {password && !passwordError && (
                 <div className="password-strength">
@@ -249,27 +264,51 @@ function Polyglot() {
                     <span></span><span></span><span></span>
                   </div>
                   <p className="file-name">
-                    {getPasswordStrength(password) === 'strong' && '🔒 Strong password'}
-                    {getPasswordStrength(password) === 'medium' && '🔓 Medium strength — consider adding symbols or numbers'}
-                    {getPasswordStrength(password) === 'weak' && '⚠️ Weak password'}
+                    {getPasswordStrength(password) === 'strong' && (
+                      <>
+                        <ShieldCheck size={14} />
+                        <span>Strong password</span>
+                      </>
+                    )}
+                    {getPasswordStrength(password) === 'medium' && (
+                      <>
+                        <ShieldAlert size={14} />
+                        <span>Medium strength — consider adding symbols or numbers</span>
+                      </>
+                    )}
+                    {getPasswordStrength(password) === 'weak' && (
+                      <>
+                        <ShieldX size={14} />
+                        <span>Weak password</span>
+                      </>
+                    )}
                   </p>
                 </div>
               )}
-              {password && !passwordError && <p className="file-name">🔐 ZIP will be password-protected</p>}
+              {password && !passwordError && (
+                <p className="file-name">
+                  <Lock size={14} />
+                  <span>ZIP will be password-protected</span>
+                </p>
+              )}
             </div>
 
             {/* Capacity Indicator - Informational for Polyglot */}
             {carrierFile && fileToHide && (
               <div className="info-box" style={{ marginBottom: '1rem' }}>
-                <h4>📊 File Size Information</h4>
+                <h4>
+                  <BarChart3 size={16} />
+                  <span>File Size Information</span>
+                </h4>
                 <p style={{ margin: '0.5rem 0' }}>
                   <strong>Carrier:</strong> {(carrierFile.size / 1024).toFixed(2)} KB
                 </p>
                 <p style={{ margin: '0.5rem 0' }}>
                   <strong>File to Hide:</strong> {(fileToHide.size / 1024).toFixed(2)} KB
                 </p>
-                <p style={{ margin: '0.5rem 0', fontSize: '0.85rem', opacity: '0.8' }}>
-                  ℹ️ Final polyglot size will be approximately {((carrierFile.size + fileToHide.size) / 1024).toFixed(2)} KB
+                <p style={{ margin: '0.5rem 0', fontSize: '0.85rem', opacity: '0.8', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Info size={14} style={{ flexShrink: 0 }} />
+                  <span>Final polyglot size will be approximately {((carrierFile.size + fileToHide.size) / 1024).toFixed(2)} KB</span>
                 </p>
               </div>
             )}
@@ -281,7 +320,10 @@ function Polyglot() {
             </button>
 
             <div className="info-box">
-              <h4>ℹ️ How it works</h4>
+              <h4>
+                <Info size={16} />
+                <span>How it works</span>
+              </h4>
               <ul>
                 <li>Your file will be zipped and appended to the carrier file</li>
                 <li>The carrier file remains fully functional</li>
@@ -291,11 +333,14 @@ function Polyglot() {
           </form>
         ) : (
           <div className="success-card">
-            <div className="success-icon">✅</div>
+            <div className="success-icon">
+              <CheckCircle2 size={48} strokeWidth={1.75} />
+            </div>
             <h3>Polyglot Created Successfully!</h3>
             <p>Your file has been hidden inside the carrier file.</p>
             <button onClick={handleDownload} className="download-button">
-              📥 Download Polyglot File
+              <Download size={16} />
+              <span>Download Polyglot File</span>
             </button>
             <button
               onClick={() => {
@@ -322,7 +367,10 @@ function Polyglot() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="extract-polyglot-password">Password (Optional) 🔒</label>
+            <label htmlFor="extract-polyglot-password" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span>Password (Optional)</span>
+              <Lock size={14} style={{ opacity: 0.7 }} />
+            </label>
             <div className="password-input-wrapper">
               <input
                 id="extract-polyglot-password"
@@ -354,7 +402,12 @@ function Polyglot() {
             </div>
           </div>
 
-          {extractSuccess && <div className="success-message">{extractSuccess}</div>}
+          {extractSuccess && (
+            <div className="success-message" role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+              <span>{extractSuccess}</span>
+            </div>
+          )}
           {error && <div className="error-message">{error}</div>}
 
           <button type="submit" disabled={loading} className="submit-button">
@@ -362,7 +415,10 @@ function Polyglot() {
           </button>
 
           <div className="info-box">
-            <h4>ℹ️ How it works</h4>
+            <h4>
+              <Info size={16} />
+              <span>How it works</span>
+            </h4>
             <ul>
               <li>Upload a file created with InvisioVault Polyglot</li>
               <li>The hidden file will be extracted and downloaded</li>
