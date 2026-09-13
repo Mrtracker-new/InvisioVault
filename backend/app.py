@@ -30,9 +30,18 @@ def create_app(config_name='default'):
     app.config['MAX_CONTENT_LENGTH'] = config[config_name].MAX_CONTENT_LENGTH
     
     # Setup CORS (AFTER config initialization so CORS_ORIGINS is validated)
+    cors_origins = list(app.config['CORS_ORIGINS'])
+    if app.config.get('DEBUG'):
+        import re
+        # In development, also allow local network private IP ranges (LAN access via --host)
+        lan_pattern = re.compile(
+            r"^http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?$"
+        )
+        cors_origins.append(lan_pattern)
+
     CORS(app, resources={
         r"/api/*": {
-            "origins": app.config['CORS_ORIGINS'],
+            "origins": cors_origins,
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type"],
             "expose_headers": ["Content-Disposition"],
@@ -136,7 +145,7 @@ def create_app(config_name='default'):
         }
 
     app.logger.info(
-        "Rate-limit active — per-route limits and exemptions declared in routes.py:"
+        "Rate-limit active -- per-route limits and exemptions declared in routes.py:"
         " /qr/detect=60/min, /api/health=exempt, /=exempt"
     )
 
@@ -189,7 +198,7 @@ if __name__ == '__main__':
 
     port = int(os.getenv('PORT', 5000))
     app.logger.info("========================================")
-    app.logger.info("InvisioVault Backend — Development Server")
+    app.logger.info("InvisioVault Backend -- Development Server")
     app.logger.info(f"Environment : {env}")
     app.logger.info(f"Port        : {port}")
     app.logger.info(f"Debug Mode  : {app.config['DEBUG']}")

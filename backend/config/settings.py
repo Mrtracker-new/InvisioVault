@@ -98,6 +98,9 @@ class Config:
         # Validate critical security settings in production
         if not app.config['DEBUG']:
             Config.validate_secret_key()
+        elif not Config.SECRET_KEY:
+            logger = logging.getLogger(__name__)
+            logger.warning("[WARNING] Using auto-generated SECRET_KEY for development. Set SECRET_KEY in .env for production!")
 
 
 class DevelopmentConfig(Config):
@@ -106,13 +109,11 @@ class DevelopmentConfig(Config):
     UPLOAD_FOLDER = 'uploads'
     
     # Default CORS for local development
-    _cors_origins_raw = 'http://localhost:5173,http://localhost:3000'
+    _cors_origins_raw = 'http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000'
     
     # Auto-generate secret key for development if not set
     if not Config.SECRET_KEY:
         SECRET_KEY = secrets.token_hex(32)
-        print(f"⚠️  WARNING: Using auto-generated SECRET_KEY for development")
-        print(f"⚠️  Set SECRET_KEY in .env for production!")
 
 
 class ProductionConfig(Config):
