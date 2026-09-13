@@ -100,9 +100,12 @@ from utils.crypto_utils import derive_fernet_key
 
 # ── Optional ECC library (Reed‑Solomon) ──────────────────────────────────────
 try:
-    from reedsolo import RSCodec
+    import importlib
+    _reedsolo = importlib.import_module("reedsolo")
+    RSCodec = _reedsolo.RSCodec
     _ECC_AVAILABLE = True
-except ImportError:
+except (ImportError, AttributeError):
+    RSCodec = None
     _ECC_AVAILABLE = False
 
 # ── Wire-format constants ──────────────────────────────────────────────────────
@@ -212,14 +215,14 @@ def _safe_decompress(data: bytes, max_size: int = _MAX_DECOMPRESSED_BYTES) -> by
 # ── ECC wrapper (Reed‑Solomon, applied after compression) ─────────────────────
 
 def _ecc_encode(data: bytes) -> bytes:
-    if not _ECC_AVAILABLE or len(data) == 0:
+    if not _ECC_AVAILABLE or RSCodec is None or len(data) == 0:
         return data
     rs = RSCodec(32)  # 32 parity bytes per ~223-byte block
     return rs.encode(data)
 
 
 def _ecc_decode(data: bytes) -> bytes:
-    if not _ECC_AVAILABLE or len(data) == 0:
+    if not _ECC_AVAILABLE or RSCodec is None or len(data) == 0:
         return data
     rs = RSCodec(32)
     try:
@@ -392,10 +395,12 @@ def _v4_threshold_from_scores(scores: np.ndarray, header_bits: int,
     raise ValueError("Image texture capacity insufficient for payload.")
 
 
-# ── LSB matching ──────────────────────────────────────────────────────────────
+# ── Legacy LSB matching (retained for backward compatibility / reference) ───────
 
 def _lsb_match(pixel_channel: int, desired_bit: int) -> int:
-    """Return channel value with LSB == desired_bit, using ±1 if needed."""
+    """Return channel value with LSB == desired_bit, using ±1 if needed.
+    Unused in v4 fast-adaptive writer which uses LSB replacement.
+    """
     if (pixel_channel & 1) == desired_bit:
         return pixel_channel
     if pixel_channel == 0:
@@ -412,6 +417,7 @@ def hide_file_in_image(
     file_path: str,
     output_path: str,
     password: str = None,
+    original_filename: str | None = None,
 ) -> str:
     """Hide a file using detection‑resistant steganography (new adaptive writer).
 
@@ -461,8 +467,9 @@ def hide_file_in_image(
         flag = _FLAG_PLAIN_FAST
 
     # ── 2. Metadata ──────────────────────────────────────────────────────────
-    original_filename = os.path.basename(file_path)
-    ext = os.path.splitext(file_path)[1].lower()
+    if not original_filename:
+        original_filename = os.path.basename(file_path)
+    ext = os.path.splitext(original_filename)[1].lower() or os.path.splitext(file_path)[1].lower()
     _MIME_MAP = {
         ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".gif": "image/gif", ".bmp": "image/bmp", ".webp": "image/webp",
@@ -472,7 +479,7 @@ def hide_file_in_image(
         ".zip": "application/zip", ".apk": "application/vnd.android.package-archive",
         ".mp4": "video/mp4",
     }
-    mime_type = _MIME_MAP.get(ext) or mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    mime_type = _MIME_MAP.get(ext) or mimetypes.guess_type(original_filename)[0] or mimetypes.guess_type(file_path)[0] or "application/octet-stream"
     metadata_plain = f"{original_filename}|{mime_type}".encode("utf-8")
     if len(metadata_plain) > _MAX_METADATA_PLAIN_LEN:
         raise ValueError(f"Metadata too long ({len(metadata_plain)} B).")

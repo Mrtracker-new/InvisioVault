@@ -54,8 +54,8 @@ _Z64_LOC_OFF_Z64_EOC_OFFSET = 8   # uint64 LE: offset of ZIP64 EOCD record
 _Z64_EOC_OFF_CD_OFFSET = 48       # uint64 LE: offset of CD start
 
 # Central Directory File Header field offsets
-_CDFH_OFF_COMP_SIZE   = 20        # uint32 LE: uncompressed size
-_CDFH_OFF_UNCOMP_SIZE = 24        # uint32 LE: compressed size   (spec order: uncomp first, comp second at +24)
+_CDFH_OFF_COMP_SIZE   = 20        # uint32 LE: compressed size
+_CDFH_OFF_UNCOMP_SIZE = 24        # uint32 LE: uncompressed size   (PKWARE spec: comp size at +20, uncomp size at +24)
 _CDFH_OFF_NAME_LEN    = 28        # uint16 LE
 _CDFH_OFF_EXTRA_LEN   = 30        # uint16 LE
 _CDFH_OFF_COMMENT_LEN = 32        # uint16 LE
@@ -75,6 +75,7 @@ def create_polyglot(
     file_to_hide_path: str,
     output_path: str,
     password: str | None = None,
+    original_filename: str | None = None,
 ) -> str:
     """Create a polyglot file that is simultaneously valid as the carrier
     format *and* as a self-contained ZIP archive.
@@ -99,7 +100,8 @@ def create_polyglot(
                            (we refuse to silently write an unencrypted zip).
         OSError:           On filesystem errors.
     """
-    original_filename = os.path.basename(file_to_hide_path)
+    if not original_filename:
+        original_filename = os.path.basename(file_to_hide_path)
 
     # We build the ZIP into a temp file first so that failures during ZIP
     # creation can never leave a half-written output file.
@@ -289,8 +291,8 @@ def _locate_zip_start(data) -> int:
             name_len  = struct.unpack_from("<H", data, pos + _CDFH_OFF_NAME_LEN)[0]
             extra_len = struct.unpack_from("<H", data, pos + _CDFH_OFF_EXTRA_LEN)[0]
             lho_64 = _z64_extra_lho(data, pos + _CDFH_SIZE + name_len, extra_len,
-                                    struct.unpack_from("<I", data, pos + _CDFH_OFF_COMP_SIZE)[0],
-                                    struct.unpack_from("<I", data, pos + _CDFH_OFF_UNCOMP_SIZE)[0])
+                                    struct.unpack_from("<I", data, pos + _CDFH_OFF_UNCOMP_SIZE)[0],
+                                    struct.unpack_from("<I", data, pos + _CDFH_OFF_COMP_SIZE)[0])
             if lho_64 is not None:
                 local_offsets.append(lho_64)
         else:
@@ -478,8 +480,8 @@ def _fix_zip_offsets_mm(data: mmap.mmap, offset: int) -> None:
         if lho_32 == _U32_MAX:
             # ZIP64 sentinel: real offset lives in the ZIP64 Extra Field (tag 0x0001)
             extra_start = cd_pos + _CDFH_SIZE + name_len
-            uncomp_32   = struct.unpack_from("<I", data, cd_pos + _CDFH_OFF_COMP_SIZE)[0]
-            comp_32     = struct.unpack_from("<I", data, cd_pos + _CDFH_OFF_UNCOMP_SIZE)[0]
+            uncomp_32   = struct.unpack_from("<I", data, cd_pos + _CDFH_OFF_UNCOMP_SIZE)[0]
+            comp_32     = struct.unpack_from("<I", data, cd_pos + _CDFH_OFF_COMP_SIZE)[0]
             patched = _patch_z64_extra_lho(data, extra_start, extra_len, uncomp_32, comp_32, offset)
             if not patched:
                 raise ValueError(
