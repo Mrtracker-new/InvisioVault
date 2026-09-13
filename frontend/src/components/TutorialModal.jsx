@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Image as ImageIcon,
   Layers,
@@ -89,24 +89,85 @@ function TipCard({ icon, title, desc }) {
 
 function TutorialModal({ isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('stego')
+  const panelRef = useRef(null)
+  const previousActiveElement = useRef(null)
 
   const handleKeyDown = useCallback(
     (e) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+        return
+      }
+
+      if (e.key === 'Tab' && panelRef.current) {
+        const focusables = panelRef.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+        if (focusables.length === 0) return
+
+        const firstElement = focusables[0]
+        const lastElement = focusables[focusables.length - 1]
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement) {
+            e.preventDefault()
+            lastElement.focus()
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            e.preventDefault()
+            firstElement.focus()
+          }
+        }
+      }
     },
     [onClose]
   )
 
   useEffect(() => {
     if (isOpen) {
+      previousActiveElement.current = document.activeElement
       document.addEventListener('keydown', handleKeyDown)
       document.body.style.overflow = 'hidden'
+
+      requestAnimationFrame(() => {
+        const firstFocusable = panelRef.current?.querySelector('button, [href], input, [tabindex]:not([tabindex="-1"])')
+        firstFocusable?.focus()
+      })
     }
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = ''
+      if (previousActiveElement.current && typeof previousActiveElement.current.focus === 'function') {
+        previousActiveElement.current.focus()
+      }
     }
   }, [isOpen, handleKeyDown])
+
+  const handleTabKeyDown = (e, currentId) => {
+    const currentIndex = TABS.findIndex((t) => t.id === currentId)
+    if (currentIndex === -1) return
+
+    let nextIndex = currentIndex
+    if (e.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % TABS.length
+    } else if (e.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + TABS.length) % TABS.length
+    } else if (e.key === 'Home') {
+      nextIndex = 0
+    } else if (e.key === 'End') {
+      nextIndex = TABS.length - 1
+    } else {
+      return
+    }
+
+    e.preventDefault()
+    const nextTab = TABS[nextIndex]
+    setActiveTab(nextTab.id)
+    const nextBtn = document.getElementById(`tm-tab-${nextTab.id}`)
+    nextBtn?.focus()
+  }
 
   if (!isOpen) return null
 
@@ -120,6 +181,7 @@ function TutorialModal({ isOpen, onClose }) {
     >
       <div
         className="tm-panel"
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -129,11 +191,12 @@ function TutorialModal({ isOpen, onClose }) {
             <p className="tm-subtitle">Select a topic below to get started</p>
           </div>
           <button
+            type="button"
             className="tm-close"
             onClick={onClose}
             aria-label="Close tutorial"
           >
-            <X size={16} />
+            <X size={16} aria-hidden="true" />
           </button>
         </div>
 
@@ -144,12 +207,14 @@ function TutorialModal({ isOpen, onClose }) {
             return (
               <button
                 key={tab.id}
+                type="button"
                 role="tab"
                 aria-selected={activeTab === tab.id}
                 aria-controls={`tm-panel-${tab.id}`}
                 id={`tm-tab-${tab.id}`}
                 className={`tm-tab ${activeTab === tab.id ? 'tm-tab--active' : ''}`}
                 onClick={() => setActiveTab(tab.id)}
+                onKeyDown={(e) => handleTabKeyDown(e, tab.id)}
               >
                 <span className="tm-tab-icon" aria-hidden="true"><TabIcon size={16} /></span>
                 <span className="tm-tab-label">{tab.label}</span>

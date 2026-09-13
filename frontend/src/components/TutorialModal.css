@@ -103,13 +103,12 @@
 /* ---------- Close Button ---------- */
 .tm-close {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
   color: var(--text-tertiary);
-  font-size: 13px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -120,18 +119,23 @@
     border-color var(--duration-fast) var(--ease-out),
     transform var(--duration-fast) var(--ease-out);
   line-height: 1;
-  margin-top: 2px;
 }
 
 .tm-close:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
   border-color: var(--border-strong);
-  transform: scale(1.08);
+  transform: scale(1.05);
 }
 
 .tm-close:active {
   transform: scale(0.96);
+}
+
+.tm-close:focus-visible,
+.tm-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* ---------- Tab Bar ---------- */
@@ -155,6 +159,7 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
+  min-height: var(--touch-target-min, 44px);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -546,8 +551,37 @@
   }
 }
 
-/* Very small devices */
-@media (max-width: 360px) {
+/* Very small devices (320px - 380px) */
+@media (max-width: 380px) {
+  .tm-overlay {
+    padding: var(--space-2);
+  }
+
+  .tm-panel {
+    max-height: 94dvh;
+  }
+
+  .tm-header {
+    padding: var(--space-3) var(--space-3);
+  }
+
+  .tm-tab-bar {
+    padding: var(--space-2) var(--space-2);
+    gap: 2px;
+  }
+
+  .tm-tab {
+    padding: 6px 8px;
+    font-size: 0.75rem;
+    min-height: 40px;
+  }
+
+  .tm-body {
+    padding: var(--space-3);
+  }
+}
+
+@media (max-width: 340px) {
   .tm-tab-label {
     display: none;
   }
