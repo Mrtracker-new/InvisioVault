@@ -1,114 +1,109 @@
-# 🔒 InvisioVault Frontend
+# InvisioVault Frontend
 
-> The pretty face of our sneaky file-hiding operation!
+The web client for InvisioVault, providing a secure, responsive interface for steganography, polyglot file creation, and QR code steganography. Built with React 19, Vite, and Lucide React.
 
-## What's This All About?
+## Getting Started
 
-Welcome to the frontend of InvisioVault! This is where all the magic happens (well, visually at least). Built with React and Vite because we like our builds fast and our code hot-reloading even faster. ⚡
+### Prerequisites
+- Node.js (v18 or higher recommended)
+- npm (v9 or higher)
 
-## 🚀 Getting Started (Let's Go!)
-
-### First Time Setup
+### Installation
+Install project dependencies:
 ```bash
 npm install
 ```
-Grab a coffee ☕ while npm does its thing.
 
-### Fire It Up!
+### Development Server
+Start the local Vite development server:
 ```bash
 npm run dev
 ```
-Boom! 💥 Your dev server should be running at `http://localhost:5173`
+The application will be accessible at `https://localhost:5173` (HTTPS enabled via `basicSsl` for camera and QR scanner hardware permissions).
 
-### Build for Production
+### Production Build
+Build the optimized static assets:
 ```bash
 npm run build
 ```
-Time to get serious. This'll bundle everything up nice and tight.
 
 ### Preview Production Build
+Locally preview the production bundle:
 ```bash
 npm run preview
 ```
-Wanna see how it'll look in the real world? This is your guy.
 
-## 🎨 What's Inside?
+## Architecture & Tech Stack
 
-- **React 19** - Because we live on the edge
-- **Vite** - Lightning-fast builds (seriously, it's ridiculously fast)
-- **Axios** - For talking to our backend buddy
-- **CSS that doesn't make you cry** - Black & white theme that's sleek AF
+- **React 19**: Component-based UI library
+- **Vite**: Modern frontend tooling and bundling
+- **Lucide React**: Vector SVG icon system
+- **Axios**: HTTP client for API communication
+- **jsQR**: In-browser QR code detection and extraction
+- **Vanilla CSS**: Custom design system with glassmorphic elements and dark mode variables
 
-## 📁 Project Structure (Where Everything Lives)
+## Directory Structure
 
 ```
 src/
-├── components/          # All our React components hang out here
-│   ├── HideFile.jsx    # Hide files like a ninja 🥷
-│   ├── ExtractFile.jsx # Find 'em again
-│   ├── Polyglot.jsx    # The shapeshifter
-│   └── TutorialModal.jsx # Help for the confused
-├── config/             # Configuration stuff
-├── App.jsx             # The main stage
-├── App.css             # Where the style magic happens
-└── main.jsx            # The entry point (it all starts here)
+├── components/
+│   ├── CapacityIndicator.jsx   # Steganographic payload capacity calculations & indicators
+│   ├── ExtractFile.jsx         # Steganographic data extraction interface
+│   ├── HideFile.jsx            # LSB image steganography encoding interface
+│   ├── Polyglot.jsx            # Multi-format polyglot creation & inspection
+│   ├── QRCode.jsx              # QR code steganography generation and scanner
+│   ├── TutorialModal.jsx       # Interactive user guide and documentation modal
+│   └── WakeServerButton.jsx    # Backend health check and wake-up trigger
+├── config/
+│   └── api.js                  # API endpoint configuration
+├── hooks/
+│   └── useQRScanner.js         # Camera stream and QR frame decoding hook
+├── App.jsx                     # Root application container and navigation
+├── App.css                     # Global layout and navigation styling
+├── variables.css               # Design system tokens (colors, spacing, typography)
+└── main.jsx                    # Application entry point
 ```
 
-## 🛠️ Tech Stack
+## Development Guidelines
 
-- **React** - For making things reactive (duh)
-- **Vite** - Dev server that goes brrrr
-- **ESLint** - Keeps our code from looking like spaghetti
-
-## 💡 Pro Tips
-
-1. **Hot Module Replacement (HMR)** is enabled - save a file and watch it update instantly. It's like magic but real.
-2. **ESLint is watching** - it'll yell at you if your code is messy (in a helpful way)
-3. **Check the browser console** - it's your friend when things go sideways
-
-## 🐛 Something Broke?
-
-Don't panic! Try these:
-
-1. **Delete `node_modules` and reinstall**
+1. **Component Standards**: Keep components modular, accessible, and aligned with the CSS design system in `variables.css`.
+2. **Icon Usage**: Use stroke-based icons from `lucide-react`. Maintain consistent sizing and alignment across controls.
+3. **API Integration**: All backend communications should resolve through the centralized API configuration in `config/api.js`.
+4. **Code Quality**: Run linting prior to committing changes:
    ```bash
-   rm -rf node_modules
-   npm install
-   ```
-   (The classic "turn it off and on again" of web development)
-
-2. **Clear Vite cache**
-   ```bash
-   rm -rf node_modules/.vite
+   npm run lint
    ```
 
-3. **Check if the backend is running** - frontend can't do much without it!
+## Troubleshooting
 
-4. **Still broken?** Open an issue on GitHub or ping @Rolan
+- **Dependency Issues**: If dependency resolution errors occur, clear the cache and reinstall:
+  ```bash
+  rm -rf node_modules package-lock.json
+  npm install
+  ```
+- **Vite Cache**: To clear the local Vite build cache:
+  ```bash
+  rm -rf node_modules/.vite
+  ```
+- **Backend Connectivity**: Ensure the InvisioVault backend is running and reachable at the configured `VITE_API_URL` or default `http://localhost:5000`.
 
-## 🎯 Want to Contribute?
+## Additional Resources
 
-Awesome! Here's what you should know:
-
-- Keep the code clean and readable (future you will thank you)
-- Follow the existing style - consistency is king
-- Test your changes before pushing (I know, revolutionary idea)
-- Write commit messages that actually mean something
-
-## 📚 Learn More
-
-- [React Docs](https://react.dev) - Everything React
-- [Vite Docs](https://vite.dev) - For when Vite does something weird
-- [InvisioVault Main README](../README.md) - The full story
-
-## 🎉 Fun Facts
-
-- This project uses Vite because webpack config files give us nightmares
-- The info button has a little spin animation because why not?
-- Every component is crafted with love (and probably too much coffee)
+- [React Documentation](https://react.dev)
+- [Vite Documentation](https://vite.dev)
+- [InvisioVault Architecture & API Documentation](../README.md)
 
 ---
 
-Made with ❤️ and probably too many energy drinks by [Rolan](https://rolan-rnr.netlify.app/)
+## Origin Story
 
-*Remember: With great steganography power comes great responsibility. Use wisely!* 🦸
+This was my first-ever repo. The original code was *ambitious*. I came back, learned cryptography properly, and rebuilt it from scratch. If you're a beginner: keep shipping. The rough early code is proof you're growing.
+
+---
+
+<p align="center">
+  <strong>Built by <a href="https://rolan-rnr.netlify.app/">Rolan</a></strong><br/>
+  <a href="mailto:rolanlobo901@gmail.com">rolanlobo901@gmail.com</a> · <a href="https://github.com/Mrtracker-new">GitHub</a>
+</p>
+
+<p align="center"><sub>MIT License — use it, fork it, build something weird with it.</sub></p>
