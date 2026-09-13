@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { HelpCircle, Shield, Image as ImageIcon, Layers, QrCode } from 'lucide-react'
 import HideFile from './components/HideFile'
 import ExtractFile from './components/ExtractFile'
 import Polyglot from './components/Polyglot'
@@ -22,11 +23,15 @@ function App() {
             className="info-button"
             onClick={() => setShowTutorial(true)}
             title="How to use InvisioVault"
+            aria-label="How to use InvisioVault"
           >
-            ℹ️
+            <HelpCircle size={20} />
           </button>
         </div>
-        <h1>🔒 InvisioVault</h1>
+        <h1 className="brand-title">
+          <Shield className="brand-icon" size={28} />
+          <span>InvisioVault</span>
+        </h1>
         <p>Secure file hiding using steganography and polyglot techniques</p>
       </header>
 
@@ -35,19 +40,22 @@ function App() {
           className={`mode-tab ${mode === 'stego' ? 'active' : ''}`}
           onClick={() => { setMode('stego'); setActiveTab('hide'); }}
         >
-          🖼️ Steganography
+          <ImageIcon size={18} />
+          <span>Steganography</span>
         </button>
         <button
           className={`mode-tab ${mode === 'polyglot' ? 'active' : ''}`}
           onClick={() => setMode('polyglot')}
         >
-          🔗 Polyglot
+          <Layers size={18} />
+          <span>Polyglot</span>
         </button>
         <button
           className={`mode-tab ${mode === 'qrcode' ? 'active' : ''}`}
           onClick={() => setMode('qrcode')}
         >
-          📱 QR Code
+          <QrCode size={18} />
+          <span>QR Code</span>
         </button>
       </div>
 
