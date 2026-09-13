@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { QrCode, Sparkles, ScanLine, Sliders, Lock, AlertTriangle, ShieldCheck, ShieldAlert, ShieldX, CheckCircle2, Download, Smartphone, Camera, Upload, RotateCcw, AlertCircle, Globe, Check, Copy, Info } from 'lucide-react'
 import axios from 'axios'
 import './QRCode.css'
 import API_URL from '../config/api'
@@ -268,7 +269,10 @@ function QRCode() {
 
     return (
         <div className="qr-code">
-            <h2>📱 QR Code Steganography</h2>
+            <h2 style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <QrCode size={22} />
+                <span>QR Code Steganography</span>
+            </h2>
             <p className="description">
                 Generate customized QR codes with hidden messages, or scan to reveal secrets
             </p>
@@ -278,13 +282,15 @@ function QRCode() {
                     className={`tab-qr ${activeTab === 'generate' ? 'active' : ''}`}
                     onClick={() => { setActiveTab('generate'); setError(''); setExtractError(''); }}
                 >
-                    ✨ Generate
+                    <Sparkles size={16} />
+                    <span>Generate</span>
                 </button>
                 <button
                     className={`tab-qr ${activeTab === 'extract' ? 'active' : ''}`}
                     onClick={() => { setActiveTab('extract'); setError(''); setExtractError(''); }}
                 >
-                    🔍 Scan & Extract
+                    <ScanLine size={16} />
+                    <span>Scan & Extract</span>
                 </button>
             </div>
 
@@ -320,7 +326,10 @@ function QRCode() {
                             </div>
 
                             <div className="customization-section">
-                                <h3>🎨 Customization</h3>
+                                <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <Sliders size={18} />
+                                    <span>Customization</span>
+                                </h3>
 
                                 <div className="form-row">
                                     <div className="form-group-half">
@@ -377,7 +386,10 @@ function QRCode() {
                             </div>
 
                             <div className="form-group">
-                                <label htmlFor="password-input">Password (Optional) 🔒</label>
+                                <label htmlFor="password-input" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                                    <span>Password (Optional)</span>
+                                    <Lock size={14} style={{ opacity: 0.7 }} />
+                                </label>
                                 <div className="password-input-wrapper">
                                     <input
                                         id="password-input"
@@ -409,7 +421,10 @@ function QRCode() {
                                     )}
                                 </div>
                                 {passwordError && (
-                                    <p id="qr-password-error" className="password-error-msg">⚠️ {passwordError}</p>
+                                    <p id="qr-password-error" className="password-error-msg" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                        <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+                                        <span>{passwordError}</span>
+                                    </p>
                                 )}
                                 {password && !passwordError && (
                                     <div className="password-strength">
@@ -417,36 +432,70 @@ function QRCode() {
                                             <span></span><span></span><span></span>
                                         </div>
                                         <p className="file-name">
-                                            {getPasswordStrength(password) === 'strong' && '🔒 Strong password'}
-                                            {getPasswordStrength(password) === 'medium' && '🔓 Medium strength — consider adding symbols or numbers'}
-                                            {getPasswordStrength(password) === 'weak' && '⚠️ Weak password'}
+                                            {getPasswordStrength(password) === 'strong' && (
+                                                <>
+                                                    <ShieldCheck size={14} />
+                                                    <span>Strong password</span>
+                                                </>
+                                            )}
+                                            {getPasswordStrength(password) === 'medium' && (
+                                                <>
+                                                    <ShieldAlert size={14} />
+                                                    <span>Medium strength — consider adding symbols or numbers</span>
+                                                </>
+                                            )}
+                                            {getPasswordStrength(password) === 'weak' && (
+                                                <>
+                                                    <ShieldX size={14} />
+                                                    <span>Weak password</span>
+                                                </>
+                                            )}
                                         </p>
                                     </div>
                                 )}
-                                {password && !passwordError && <p className="file-name">🔐 Secret will be password-protected</p>}
+                                {password && !passwordError && (
+                                    <p className="file-name">
+                                        <Lock size={14} />
+                                        <span>Secret will be password-protected</span>
+                                    </p>
+                                )}
                             </div>
 
                             {error && <div className="error-message">{error}</div>}
 
-                            <button type="submit" disabled={loading} className="submit-button">
-                                {loading ? 'Generating...' : '✨ Generate QR Code'}
+                            <button type="submit" disabled={loading} className="submit-button" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                                {loading ? 'Generating...' : (
+                                    <>
+                                        <Sparkles size={16} />
+                                        <span>Generate QR Code</span>
+                                    </>
+                                )}
                             </button>
                         </form>
                     ) : (
                         <div className="success-card">
-                            <div className="success-icon">✅</div>
+                            <div className="success-icon">
+                                <CheckCircle2 size={48} strokeWidth={1.75} />
+                            </div>
                             <h3>QR Code Generated Successfully!</h3>
                             {qrPreview && (
                                 <div className="qr-preview">
                                     <img src={qrPreview} alt="Generated QR Code" />
-                                    <p className="preview-hint">
-                                        📱 Scan with phone → Shows: {publicData}<br />
-                                        🔍 Scan with InvisioVault → Also reveals secret message
-                                    </p>
+                                    <div className="preview-hint">
+                                        <p style={{ margin: '4px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                            <Smartphone size={14} />
+                                            <span>Scan with phone → Shows: {publicData}</span>
+                                        </p>
+                                        <p style={{ margin: '4px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                            <ScanLine size={14} />
+                                            <span>Scan with InvisioVault → Also reveals secret message</span>
+                                        </p>
+                                    </div>
                                 </div>
                             )}
                             <button onClick={handleDownload} className="download-button">
-                                📥 Download QR Code
+                                <Download size={16} />
+                                <span>Download QR Code</span>
                             </button>
                             <button onClick={resetGenerate} className="new-button">
                                 Create Another QR Code
@@ -464,13 +513,15 @@ function QRCode() {
                                     className={`mode-btn ${scanMode === 'camera' ? 'active' : ''}`}
                                     onClick={() => setScanMode('camera')}
                                 >
-                                    📷 Camera Scan
+                                    <Camera size={16} />
+                                    <span>Camera Scan</span>
                                 </button>
                                 <button
                                     className={`mode-btn ${scanMode === 'upload' ? 'active' : ''}`}
                                     onClick={() => setScanMode('upload')}
                                 >
-                                    📤 Upload Image
+                                    <Upload size={16} />
+                                    <span>Upload Image</span>
                                 </button>
                             </div>
 
@@ -507,21 +558,30 @@ function QRCode() {
 
                                         {!cameraActive && !scanError && (
                                             <div className="camera-placeholder">
-                                                <p>📷 Starting camera...</p>
+                                                <p style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                    <Camera size={18} />
+                                                    <span>Starting camera...</span>
+                                                </p>
                                             </div>
                                         )}
 
                                         {cameraActive && !boundingBox && (
                                             <div className="scanning-overlay">
                                                 <div className="scan-frame"></div>
-                                                <p className="scan-hint">📱 Point your camera at a QR code</p>
+                                                <p className="scan-hint" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                                    <ScanLine size={14} />
+                                                    <span>Point your camera at a QR code</span>
+                                                </p>
                                             </div>
                                         )}
                                     </div>
 
                                     {(scanError || cameraError) && (
                                         <div className="error-message" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-                                            <span>📵 {cameraError || scanError}</span>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <AlertCircle size={16} />
+                                                <span>{cameraError || scanError}</span>
+                                            </span>
                                             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                                 <button
                                                     type="button"
@@ -529,7 +589,8 @@ function QRCode() {
                                                     style={{ fontSize: '0.8rem', padding: '6px 12px' }}
                                                     onClick={() => { setCameraError(''); resetScanner() }}
                                                 >
-                                                    🔄 Try Again
+                                                    <RotateCcw size={14} />
+                                                    <span>Try Again</span>
                                                 </button>
                                                 <button
                                                     type="button"
@@ -537,7 +598,8 @@ function QRCode() {
                                                     style={{ fontSize: '0.8rem', padding: '6px 12px' }}
                                                     onClick={() => setScanMode('upload')}
                                                 >
-                                                    📤 Switch to Upload
+                                                    <Upload size={14} />
+                                                    <span>Switch to Upload</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -545,7 +607,10 @@ function QRCode() {
 
                                     {extractLoading && (
                                         <div className="scanning-status">
-                                            <p>🔍 Extracting hidden data...</p>
+                                            <p style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                                <ScanLine size={16} />
+                                                <span>Extracting hidden data...</span>
+                                            </p>
                                         </div>
                                     )}
 
@@ -637,49 +702,86 @@ function QRCode() {
 
                                     {extractError && <div className="error-message">{extractError}</div>}
 
-                                    <button type="submit" disabled={extractLoading} className="submit-button">
-                                        {extractLoading ? 'Scanning...' : '🔍 Scan & Extract'}
+                                    <button type="submit" disabled={extractLoading} className="submit-button" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                                        {extractLoading ? 'Scanning...' : (
+                                            <>
+                                                <ScanLine size={16} />
+                                                <span>Scan & Extract</span>
+                                            </>
+                                        )}
                                     </button>
                                 </form>
                             )}
                         </div>
                     ) : (
                         <div className="extracted-data">
-                            <div className="success-icon">🎉</div>
+                            <div className="success-icon">
+                                <CheckCircle2 size={48} strokeWidth={1.75} />
+                            </div>
                             <h3>Data Extracted Successfully!</h3>
 
                             <div className="data-section">
-                                <h4>📱 Public Data (Visible):</h4>
+                                <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Globe size={16} />
+                                    <span>Public Data (Visible):</span>
+                                </h4>
                                 <div className="data-box">
                                     <p>{extractedData.publicData}</p>
                                     <button
                                         className="copy-btn"
                                         onClick={() => copyToClipboard(extractedData.publicData, 'Public data')}
                                     >
-                                        {copiedField === 'Public data' ? '✓ Copied!' : '📋 Copy'}
+                                        {copiedField === 'Public data' ? (
+                                            <>
+                                                <Check size={14} />
+                                                <span>Copied!</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Copy size={14} />
+                                                <span>Copy</span>
+                                            </>
+                                        )}
                                     </button>
                                 </div>
                             </div>
 
                             {extractedData.secretData ? (
                                 <div className="data-section">
-                                    <h4>🔐 Hidden Secret Message:</h4>
+                                    <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <Lock size={16} />
+                                        <span>Hidden Secret Message:</span>
+                                    </h4>
                                     <div className="data-box secret">
                                         <p>{extractedData.secretData}</p>
                                         <button
                                             className="copy-btn"
                                             onClick={() => copyToClipboard(extractedData.secretData, 'Secret data')}
                                         >
-                                            {copiedField === 'Secret data' ? '✓ Copied!' : '📋 Copy'}
+                                            {copiedField === 'Secret data' ? (
+                                                <>
+                                                    <Check size={14} />
+                                                    <span>Copied!</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Copy size={14} />
+                                                    <span>Copy</span>
+                                                </>
+                                            )}
                                         </button>
                                     </div>
                                 </div>
                             ) : (
                                 <div className="data-section">
-                                    <h4>🔐 Hidden Secret Message:</h4>
+                                    <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <Lock size={16} />
+                                        <span>Hidden Secret Message:</span>
+                                    </h4>
                                     <div className="data-box" style={{ background: 'var(--bg-elevated)', borderStyle: 'dashed' }}>
-                                        <p style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
-                                            ℹ️ No hidden data found. This appears to be a regular QR code without steganographic content.
+                                        <p style={{ color: 'var(--text-tertiary)', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <Info size={16} style={{ flexShrink: 0 }} />
+                                            <span>No hidden data found. This appears to be a regular QR code without steganographic content.</span>
                                         </p>
                                     </div>
                                     <small style={{ display: 'block', marginTop: 'var(--space-2)', color: 'var(--text-tertiary)' }}>
