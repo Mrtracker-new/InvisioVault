@@ -17,22 +17,31 @@
     --text-primary: #ffffff;
     --text-secondary: #a3a3a3;
     /* Neutral gray for supporting text */
-    --text-tertiary: #737373;
-    /* Darker gray for placeholders/disabled */
+    --text-tertiary: #9ca3af;
+    /* Accessible high-contrast gray (>6.5:1 against #050505 for WCAG 2.2 AA) */
     --text-invert: #000000;
     /* Text on white backgrounds */
 
     /* Borders / Dividers */
-    --border-subtle: rgba(255, 255, 255, 0.06);
-    --border-strong: rgba(255, 255, 255, 0.12);
-    --border-focus: rgba(255, 255, 255, 0.3);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --border-focus: rgba(255, 255, 255, 0.4);
+
+    /* Accessible Focus Ring */
+    --focus-ring: 0 0 0 2px #050505, 0 0 0 4px rgba(255, 255, 255, 0.6);
+    --focus-ring-subtle: 0 0 0 2px #050505, 0 0 0 3px rgba(255, 255, 255, 0.35);
+
+    /* Touch & Click Targets */
+    --touch-target-min: 44px;
 
     /* Accents (Use sparingly) */
     --accent-primary: #ffffff;
     --accent-success: #4ade80;
     /* Subtle green */
+    --accent-success-dim: rgba(74, 222, 128, 0.15);
     --accent-error: #ef4444;
     /* Subtle red */
+    --accent-error-dim: rgba(239, 68, 68, 0.15);
 
     /* ------------------------------
      2. Typography
