@@ -26,8 +26,7 @@ from utils.validators import validate_image, validate_hideable_file, MAX_STEGO_I
 from utils.qr_stego import (
     generate_qr_with_stego,
     extract_from_qr_stego,
-    calculate_qr_capacity,
-    decode_qr_only
+    calculate_qr_capacity
 )
 
 
@@ -52,6 +51,8 @@ SAFE_ERROR_MESSAGES = {
     'capacity': 'The selected image is too small to hide this file.',
     'validation': 'Invalid file format or corrupted data.',
     'not_found': 'The requested file could not be found.',
+    'no_hidden_data': 'No hidden data found in this file or invalid format.',
+    'no_qr': 'No QR code found in the image.',
     'generic': 'An error occurred while processing your request. Please try again.'
 }
 
@@ -91,14 +92,25 @@ def sanitize_error(error_message: str, is_debug: bool = False) -> str:
     # Map specific errors to safe messages
     error_lower = error_message.lower()
     
-    if 'password' in error_lower:
+    if 'no qr code' in error_lower:
+        return SAFE_ERROR_MESSAGES['no_qr']
+    elif 'password' in error_lower:
         return SAFE_ERROR_MESSAGES['password']
-    elif 'capacity' in error_lower or 'not enough' in error_lower:
+    elif 'capacity' in error_lower or 'not enough' in error_lower or 'too large' in error_lower or 'exceeds' in error_lower:
         return SAFE_ERROR_MESSAGES['capacity']
-    elif 'invalid' in error_lower or 'corrupt' in error_lower or 'failed to extract' in error_lower:
-        return SAFE_ERROR_MESSAGES['validation']
+    elif (
+        'no hidden' in error_lower or
+        'out of range' in error_lower or
+        'outside the valid range' in error_lower or
+        'missing separator' in error_lower or
+        'missing format' in error_lower or
+        'magic' in error_lower
+    ):
+        return SAFE_ERROR_MESSAGES['no_hidden_data']
     elif 'not found' in error_lower:
         return SAFE_ERROR_MESSAGES['not_found']
+    elif 'invalid' in error_lower or 'corrupt' in error_lower or 'failed to extract' in error_lower:
+        return SAFE_ERROR_MESSAGES['validation']
     else:
         return SAFE_ERROR_MESSAGES['generic']
 
@@ -267,17 +279,19 @@ def hide_file():
             file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_hidden_text.txt")
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(text_to_hide)
+            clean_original_filename = "hidden_text.txt"
         else:
             # Validate and save uploaded file
             validate_hideable_file(file_to_hide)
             file_filename = _safe_upload_name(file_to_hide.filename)
             file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{file_filename}")
             file_to_hide.save(file_path)
+            clean_original_filename = file_filename
 
         # Hide file in image
         output_filename = f"{secrets.token_urlsafe(16)}.png"
         output_path = os.path.join(upload_folder, output_filename)
-        hide_file_in_image(image_path, file_path, output_path, password)
+        hide_file_in_image(image_path, file_path, output_path, password, original_filename=clean_original_filename)
 
         logger.info(f"Successfully hid file in image: {output_filename}")
         return jsonify({
@@ -432,12 +446,14 @@ def create_polyglot_file():
         carrier_file.save(carrier_path)
         file_to_hide.save(file_path)
 
-        # Create polyglot file with same extension as carrier
+        # Create polyglot file with same extension as carrier (fallback to .bin if missing or invalid)
         carrier_ext = os.path.splitext(carrier_filename)[1]
+        if not carrier_ext or not carrier_ext.lstrip('.').isalnum():
+            carrier_ext = '.bin'
         output_filename = f"{secrets.token_urlsafe(16)}{carrier_ext}"
         output_path = os.path.join(upload_folder, output_filename)
         
-        create_polyglot(carrier_path, file_path, output_path, password)
+        create_polyglot(carrier_path, file_path, output_path, password, original_filename=file_filename)
 
         logger.info(f"Successfully created polyglot file: {output_filename}")
         return jsonify({
@@ -670,7 +686,7 @@ def download_qr_code(download_id):
 
 
 @api.route('/qr/scan', methods=['POST'])
-@limiter.limit("20 per hour", override_defaults=False)
+@limiter.limit("60 per hour", override_defaults=False)
 def scan_qr_code():
     """Scan a QR code and extract both public and hidden data.
 
@@ -881,7 +897,8 @@ def detect_qr():
         
         # Try to decode QR code
         try:
-            import zxingcpp
+            import importlib
+            zxingcpp = importlib.import_module("zxingcpp")
             
             # Open and decode the image
             img = Image.open(filepath)
