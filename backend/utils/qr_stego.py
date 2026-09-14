@@ -416,6 +416,30 @@ def _extract_visual_qr(
     qr_ref = segno.make(public_data, version=target_ver, error="m", boost_error=False)
     ref_matrix = qr_ref.matrix
 
+    # Calibrate baseline dark and light luminance directly from structural finder patterns
+    dark_samples: List[int] = []
+    for dr in range(2, 5):
+        for dc in range(2, 5):
+            px = rectified.getpixel((dc * scale + scale // 2, dr * scale + scale // 2))
+            dark_samples.append(px[0] if isinstance(px, tuple) else px)
+    dark_base = sum(dark_samples) / len(dark_samples)
+
+    light_samples: List[int] = []
+    for dc in range(1, 6):
+        px1 = rectified.getpixel((dc * scale + scale // 2, 1 * scale + scale // 2))
+        px2 = rectified.getpixel((dc * scale + scale // 2, 5 * scale + scale // 2))
+        light_samples.append(px1[0] if isinstance(px1, tuple) else px1)
+        light_samples.append(px2[0] if isinstance(px2, tuple) else px2)
+    light_base = sum(light_samples) / len(light_samples)
+
+    contrast = light_base - dark_base
+    if contrast < 15:
+        return public_data, ""
+
+    effective_delta = max(6.0, VISUAL_MODULATION_DELTA * (contrast / 255.0))
+    threshold_dark = dark_base + (effective_delta * 0.45)
+    threshold_light = light_base - (effective_delta * 0.45)
+
     safe_mods = get_safe_data_modules(target_ver)
     seed_material = f"{public_data}|{target_ver}|{qr_size}".encode("utf-8")
     perm_seed = hashlib.sha256(seed_material).digest()
@@ -436,9 +460,9 @@ def _extract_visual_qr(
                 samples.append(luma)
         avg = sum(samples) / len(samples)
         if is_dark:
-            bit = 1 if avg > 14 else 0
+            bit = 1 if avg > threshold_dark else 0
         else:
-            bit = 1 if avg < 241 else 0
+            bit = 1 if avg < threshold_light else 0
         header_bits.append(bit)
 
     header_bytes = bytearray()
@@ -475,9 +499,9 @@ def _extract_visual_qr(
                 samples.append(luma)
         avg = sum(samples) / len(samples)
         if is_dark:
-            bit = 1 if avg > 14 else 0
+            bit = 1 if avg > threshold_dark else 0
         else:
-            bit = 1 if avg < 241 else 0
+            bit = 1 if avg < threshold_light else 0
         all_bits.append(bit)
 
     container_bytes = bytearray()
@@ -600,12 +624,9 @@ def generate_qr_with_stego(
     # Determine embedding strategy
     chosen_method = method.lower()
     if chosen_method == "auto":
-        # Check if secret fits in Visual Module mode comfortably (<= 300 bytes compressed)
-        container_bytes = pack_qr_container(secret_text, password)
-        if len(container_bytes) * 8 <= 2500 and not logo_path:
-            chosen_method = "visual"
-        else:
-            chosen_method = "stream"
+        # Always use robust stream mode by default so that QR codes survive
+        # real-world camera scanning, prints, screenshots, and custom colors.
+        chosen_method = "stream"
 
     logger.info(
         "Generating QR steganography using method='%s' (public_len=%d, secret_len=%d)",
@@ -658,10 +679,12 @@ def generate_qr_with_stego(
 def extract_from_qr_stego(
     qr_path: str,
     password: Optional[str] = None,
+    raw_qr_text: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Extract visible data and hidden secret from a QR code image.
 
     Implements an 8-stage extraction pipeline:
+      0. Client-assisted decode: If raw_qr_text contains #IVDATA:, decode immediately.
       1. Detect QR location and geometry (ZXing with PyZbar fallback).
       2. Reconstruct QR module matrix & read visible string.
       3. If '#IVDATA:' fragment exists: decode & decrypt from stream.
@@ -672,8 +695,9 @@ def extract_from_qr_stego(
       8. Return (public_data, secret_text).
 
     Args:
-        qr_path:  Path to QR code image.
-        password: Decryption password if the secret was sealed with one.
+        qr_path:     Path to QR code image.
+        password:    Decryption password if the secret was sealed with one.
+        raw_qr_text: Optional decoded QR string from client-side scanner.
 
     Returns:
         (public_data, secret_text)
@@ -682,7 +706,22 @@ def extract_from_qr_stego(
         QRStegoError: On missing QR, wrong password, or corrupted data.
     """
     try:
-        logger.info("Extracting from QR code: %s", qr_path)
+        logger.info("Extracting from QR code: %s (has_raw_text=%s)", qr_path, bool(raw_qr_text))
+
+        # Fast-path: client-side scanner already decoded the full stream container
+        if raw_qr_text and "#IVDATA:" in raw_qr_text:
+            parts = raw_qr_text.split("#IVDATA:", maxsplit=1)
+            public_data = parts[0]
+            secret_encoded = parts[1] if len(parts) > 1 else ""
+            if secret_encoded:
+                secret_text = _decode_payload(secret_encoded, password)
+                logger.info(
+                    "Extraction complete from client stream. Public: %d chars, Secret: %d chars.",
+                    len(public_data),
+                    len(secret_text),
+                )
+                return public_data, secret_text
+
         if not os.path.exists(qr_path):
             raise QRStegoError(
                 f"QR code file not found: {qr_path}",
@@ -716,6 +755,17 @@ def extract_from_qr_stego(
             pyz_res = pyzbar.decode(img)
             if pyz_res:
                 qr_text = pyz_res[0].data.decode("utf-8", errors="replace")
+                if hasattr(pyz_res[0], "polygon") and len(pyz_res[0].polygon) == 4:
+                    poly = pyz_res[0].polygon
+                    class _PyzbarPosition:
+                        def __init__(self, p):
+                            self.top_left = p[0]
+                            self.bottom_left = p[1]
+                            self.bottom_right = p[2]
+                            self.top_right = p[3]
+                    position = _PyzbarPosition(poly)
+            elif raw_qr_text:
+                qr_text = raw_qr_text
             else:
                 raise QRStegoError(
                     "No QR code found in the image.",

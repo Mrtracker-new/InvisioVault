@@ -145,23 +145,33 @@ def deterministic_permute(items: list, seed: bytes) -> list:
 
 
 def _verify_finder_pattern(rect: Image.Image, r0: int, c0: int, scale: int = 10) -> bool:
-    """Verify standard 7x7 concentric finder pattern at (r0, c0)."""
+    """Verify standard 7x7 concentric finder pattern at (r0, c0) using relative contrast."""
     # Center 3x3 must be dark: (r0+2..r0+4, c0+2..c0+4)
+    center_samples: List[int] = []
     for dr in range(2, 5):
         for dc in range(2, 5):
             px = rect.getpixel(((c0 + dc) * scale + scale // 2, (r0 + dr) * scale + scale // 2))
-            luma = px[0] if isinstance(px, tuple) else px
-            if luma > 140:
-                return False
+            center_samples.append(px[0] if isinstance(px, tuple) else px)
 
-    # Ring around center must be light: (r0+1, c0+1..5), (r0+5, c0+1..5)
+    # Ring around center must be light: (r0+1, c0+1..5), (r0+5, c0+1..5) and vertical edges
+    ring_samples: List[int] = []
     for dc in range(1, 6):
         px1 = rect.getpixel(((c0 + dc) * scale + scale // 2, (r0 + 1) * scale + scale // 2))
         px2 = rect.getpixel(((c0 + dc) * scale + scale // 2, (r0 + 5) * scale + scale // 2))
-        l1 = px1[0] if isinstance(px1, tuple) else px1
-        l2 = px2[0] if isinstance(px2, tuple) else px2
-        if l1 < 115 or l2 < 115:
-            return False
+        ring_samples.append(px1[0] if isinstance(px1, tuple) else px1)
+        ring_samples.append(px2[0] if isinstance(px2, tuple) else px2)
+    for dr in range(2, 5):
+        px1 = rect.getpixel(((c0 + 1) * scale + scale // 2, (r0 + dr) * scale + scale // 2))
+        px2 = rect.getpixel(((c0 + 5) * scale + scale // 2, (r0 + dr) * scale + scale // 2))
+        ring_samples.append(px1[0] if isinstance(px1, tuple) else px1)
+        ring_samples.append(px2[0] if isinstance(px2, tuple) else px2)
+
+    avg_center = sum(center_samples) / len(center_samples)
+    avg_ring = sum(ring_samples) / len(ring_samples)
+
+    # Ring must be substantially lighter than dark center (contrast difference >= 20)
+    if avg_ring - avg_center < 20:
+        return False
 
     return True
 

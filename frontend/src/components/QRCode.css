@@ -697,7 +697,76 @@
 .download-button:focus-visible,
 .new-button:focus-visible,
 .submit-button:focus-visible,
-.password-toggle:focus-visible {
+.password-toggle:focus-visible,
+.method-card:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
+}
+
+/* Steganography Method Selector */
+.method-selector-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+}
+
+.method-card {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-card);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+    position: relative;
+    user-select: none;
+}
+
+.method-card:hover {
+    border-color: var(--border-focus);
+    background: var(--bg-elevated);
+}
+
+.method-card.active {
+    border-color: var(--accent-primary, #6366f1);
+    background: rgba(99, 102, 241, 0.08);
+    box-shadow: 0 0 0 1px var(--accent-primary, #6366f1);
+}
+
+.method-card-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: var(--font-semibold);
+    color: var(--text-primary);
+    margin-bottom: var(--space-1);
+    font-size: var(--text-sm);
+}
+
+.method-badge-rec {
+    font-size: 0.65rem;
+    font-weight: var(--font-bold);
+    padding: 1px 6px;
+    border-radius: 9999px;
+    background: var(--accent-primary, #6366f1);
+    color: #ffffff;
+    margin-left: auto;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.method-card-desc {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+    .method-selector-grid {
+        grid-template-columns: 1fr;
+    }
 }

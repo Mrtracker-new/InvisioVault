@@ -649,7 +649,9 @@ def generate_qr_code():
                 # If logo validation fails, continue without logo
                 logo_path = None
 
-        method = request.form.get('method', 'auto').strip()
+        method = request.form.get('method', 'auto').strip().lower()
+        if method not in ('auto', 'stream', 'visual'):
+            method = 'auto'
 
         # Generate QR code with steganography
         output_filename = f"{secrets.token_urlsafe(16)}_qr.png"
@@ -733,8 +735,9 @@ def scan_qr_code():
         # Validate request
         qr_image = request.files.get('image')
         password = request.form.get('password') or None
+        raw_qr_data = request.form.get('raw_qr_data') or None
         
-        logger.info(f'QR scan: Request received, password provided: {password is not None}')
+        logger.info(f'QR scan: Request received, password provided: {password is not None}, raw_data provided: {raw_qr_data is not None}')
         
         if not qr_image:
             logger.warning('QR scan: No image provided in request')
@@ -746,7 +749,9 @@ def scan_qr_code():
         # Burst deduplication cache check (prevents camera frame spam from burning CPU)
         img_bytes = qr_image.read()
         qr_image.seek(0)
-        cache_key = hashlib.sha256(img_bytes + (password or "").encode("utf-8")).hexdigest()
+        cache_key = hashlib.sha256(
+            img_bytes + (password or "").encode("utf-8") + (raw_qr_data or "").encode("utf-8")
+        ).hexdigest()
         now = time.time()
 
         with _qr_cache_lock:
@@ -774,7 +779,9 @@ def scan_qr_code():
 
         # Extract both public and secret data
         logger.info('QR scan: Extracting data from QR code...')
-        public_data, secret_data = extract_from_qr_stego(qr_path, password)
+        public_data, secret_data = extract_from_qr_stego(
+            qr_path, password=password, raw_qr_text=raw_qr_data
+        )
 
         logger.info(f'QR scan: Successfully extracted data. Public data length: {len(public_data)}, Secret data present: {bool(secret_data)}')
         resp_data = {

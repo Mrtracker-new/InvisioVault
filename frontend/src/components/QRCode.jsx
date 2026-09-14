@@ -35,6 +35,7 @@ function QRCode() {
     const [fgColor, setFgColor] = useState('#000000')
     const [bgColor, setBgColor] = useState('#FFFFFF')
     const [scale, setScale] = useState(20) // Increased to 20 for better scannability
+    const [stegoMethod, setStegoMethod] = useState('stream') // 'stream' (Robust) or 'visual' (Stealth)
     const [logo, setLogo] = useState(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
@@ -92,6 +93,10 @@ function QRCode() {
 
             const formData = new FormData()
             formData.append('image', blob, 'scanned-qr.png')
+
+            if (rawQrData) {
+                formData.append('raw_qr_data', rawQrData)
+            }
 
             if (extractPassword) {
                 console.log('[QRCode Component] Using password for extraction')
@@ -177,6 +182,7 @@ function QRCode() {
             formData.append('fg_color', fgColor)
             formData.append('bg_color', bgColor)
             formData.append('scale', scale)
+            formData.append('method', stegoMethod)
 
             if (password) {
                 formData.append('password', password)
@@ -275,6 +281,7 @@ function QRCode() {
         setPublicData('')
         setSecretText('')
         setPassword('')
+        setStegoMethod('stream')
         setLogo(null)
         if (document.getElementById('logo-input')) {
             document.getElementById('logo-input').value = ''
@@ -396,6 +403,40 @@ function QRCode() {
                                 />
                                 {secretText && <p className="char-count">Characters: {secretText.length}</p>}
                                 <small>This will be hidden in the QR code using steganography</small>
+                            </div>
+
+                            <div className="form-group">
+                                <label>Steganography Mode</label>
+                                <div className="method-selector-grid">
+                                    <button
+                                        type="button"
+                                        className={`method-card ${stegoMethod === 'stream' ? 'active' : ''}`}
+                                        onClick={() => setStegoMethod('stream')}
+                                    >
+                                        <div className="method-card-header">
+                                            <ShieldCheck size={16} style={{ color: 'var(--accent-primary)' }} />
+                                            <span>Robust Stream</span>
+                                            <span className="method-badge-rec">Recommended</span>
+                                        </div>
+                                        <p className="method-card-desc">
+                                            URL Fragment encoded with Reed-Solomon ECC. Survives camera scans, prints, screenshots, and custom colors.
+                                        </p>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        className={`method-card ${stegoMethod === 'visual' ? 'active' : ''}`}
+                                        onClick={() => setStegoMethod('visual')}
+                                    >
+                                        <div className="method-card-header">
+                                            <EyeOff size={16} style={{ color: 'var(--accent-primary)' }} />
+                                            <span>Stealth Visual</span>
+                                        </div>
+                                        <p className="method-card-desc">
+                                            Embedded in pixel luminance layer. Public barcode displays clean URL only. Best for direct digital PNG file sharing.
+                                        </p>
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="customization-section">

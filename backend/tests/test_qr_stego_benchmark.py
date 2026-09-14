@@ -139,24 +139,38 @@ class QRStegoRobustnessTests(unittest.TestCase):
             down_400 = base_img.resize((400, 400), Image.Resampling.LANCZOS).convert("RGB")
             z_400 = zxingcpp.read_barcodes(down_400)
             self.assertTrue(bool(z_400), "ZXing failed on 400px resize")
+            # Verify secret extraction from resized image
+            down_400_path = os.path.join(self.test_dir, "down_400.png")
+            down_400.save(down_400_path)
+            _, sec_400 = extract_from_qr_stego(down_400_path, password=self.password)
+            self.assertEqual(sec_400, secret)
 
             # 2. Downscale to 300x300
             down_300 = base_img.resize((300, 300), Image.Resampling.LANCZOS).convert("RGB")
             z_300 = zxingcpp.read_barcodes(down_300)
             self.assertTrue(bool(z_300), "ZXing failed on 300px resize")
+            down_300_path = os.path.join(self.test_dir, "down_300.png")
+            down_300.save(down_300_path)
+            _, sec_300 = extract_from_qr_stego(down_300_path, password=self.password)
+            self.assertEqual(sec_300, secret)
 
             # 3. Gaussian blur
             blurred = base_img.filter(ImageFilter.GaussianBlur(radius=1.2)).convert("RGB")
             z_blur = zxingcpp.read_barcodes(blurred)
             self.assertTrue(bool(z_blur), "ZXing failed on 1.2px blur")
+            blur_path = os.path.join(self.test_dir, "blurred.png")
+            blurred.save(blur_path)
+            _, sec_blur = extract_from_qr_stego(blur_path, password=self.password)
+            self.assertEqual(sec_blur, secret)
 
             # 4. JPEG Quality 90
-            jpg_buf = io.BytesIO()
-            base_img.convert("RGB").save(jpg_buf, format="JPEG", quality=90)
-            jpg_buf.seek(0)
-            jpg_img = Image.open(jpg_buf).convert("RGB")
+            jpg_path = os.path.join(self.test_dir, "quality90.jpg")
+            base_img.convert("RGB").save(jpg_path, format="JPEG", quality=90)
+            jpg_img = Image.open(jpg_path).convert("RGB")
             z_jpg = zxingcpp.read_barcodes(jpg_img)
             self.assertTrue(bool(z_jpg), "ZXing failed on JPEG Q90")
+            _, sec_jpg = extract_from_qr_stego(jpg_path, password=self.password)
+            self.assertEqual(sec_jpg, secret)
 
     def test_logo_embedding_preserves_error_correction(self):
         """Verify centered logo embedding does not break scannability."""
@@ -222,6 +236,56 @@ class QRStegoRobustnessTests(unittest.TestCase):
         self.assertIn("maxSafeVersion", info)
         self.assertLessEqual(info["maxSafeVersion"], 22)
         self.assertGreater(info["safeCapacityBytes"], 100)
+
+    def test_default_method_is_robust_stream(self):
+        """Verify default (auto) method generates stream QR code with URL fragment."""
+        out_path = os.path.join(self.test_dir, "test_auto_default.png")
+        secret = "Auto Default Mode Secret"
+        generate_qr_with_stego(
+            public_data=self.public_url,
+            secret_text=secret,
+            output_path=out_path,
+        )
+        with Image.open(out_path) as img:
+            z_res = zxingcpp.read_barcodes(img.convert("RGB"))
+            self.assertTrue(bool(z_res))
+            self.assertIn("#IVDATA:", z_res[0].text)
+
+        pub_ext, sec_ext = extract_from_qr_stego(out_path)
+        self.assertEqual(pub_ext, self.public_url)
+        self.assertEqual(sec_ext, secret)
+
+    def test_visual_mode_custom_colors(self):
+        """Verify Visual Mode works with custom non-black/white foreground colors."""
+        out_path = os.path.join(self.test_dir, "test_visual_navy.png")
+        secret = "Navy Visual Stego"
+        generate_qr_with_stego(
+            public_data=self.public_url,
+            secret_text=secret,
+            output_path=out_path,
+            method="visual",
+            fg_color="#102030",
+        )
+        pub_ext, sec_ext = extract_from_qr_stego(out_path)
+        self.assertEqual(pub_ext, self.public_url)
+        self.assertEqual(sec_ext, secret)
+
+    def test_raw_qr_text_assisted_extraction(self):
+        """Verify raw_qr_text accelerates stream extraction even if image scan is simulated."""
+        out_path = os.path.join(self.test_dir, "test_raw_assist.png")
+        secret = "Client Assisted Secret Payload"
+        generate_qr_with_stego(
+            public_data=self.public_url,
+            secret_text=secret,
+            output_path=out_path,
+        )
+        with Image.open(out_path) as img:
+            z_res = zxingcpp.read_barcodes(img.convert("RGB"))
+            raw_text = z_res[0].text
+
+        pub_ext, sec_ext = extract_from_qr_stego(out_path, raw_qr_text=raw_text)
+        self.assertEqual(pub_ext, self.public_url)
+        self.assertEqual(sec_ext, secret)
 
 
 def run_benchmark():
