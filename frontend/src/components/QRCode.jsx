@@ -53,8 +53,8 @@ function QRCode() {
     const [cameraError, setCameraError] = useState('')
     const [copiedField, setCopiedField] = useState('')
 
-    // Camera scanner with callbacks
-    const isScanning = activeTab === 'extract' && scanMode === 'camera'
+    // Camera scanner with callbacks: Stop streaming when data is extracted or tab/mode inactive
+    const isScanning = activeTab === 'extract' && scanMode === 'camera' && !extractedData
 
     const MIN_PASSWORD_LENGTH = 8
 
@@ -141,7 +141,7 @@ function QRCode() {
         setCameraError(msg)
     }
 
-    const { videoRef, canvasRef, error: scanError, isScanning: cameraActive, reset: resetScanner, boundingBox } = useQRScanner(
+    const { videoRef, canvasRef, error: scanError, isScanning: cameraActive, reset: resetScanner, boundingBox, clearCooldown } = useQRScanner(
         isScanning,
         handleQRDetected,
         handleScanError
@@ -287,6 +287,7 @@ function QRCode() {
         setExtractedData(null)
         setExtractError('')
         setCameraError('')
+        if (clearCooldown) clearCooldown()
         resetScanner()
         if (document.getElementById('uploaded-qr-input')) {
             document.getElementById('uploaded-qr-input').value = ''
@@ -717,7 +718,22 @@ function QRCode() {
                                     )}
 
                                     {extractError && !scanError && !cameraError && (
-                                        <div className="error-message" role="alert">{extractError}</div>
+                                        <div className="error-message" role="alert" style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
+                                            <span>{extractError}</span>
+                                            <button
+                                                type="button"
+                                                className="mode-btn"
+                                                style={{ fontSize: '0.8rem', padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                                                onClick={() => {
+                                                    setExtractError('')
+                                                    if (clearCooldown) clearCooldown()
+                                                    resetScanner()
+                                                }}
+                                            >
+                                                <RotateCcw size={13} />
+                                                <span>Retry Scan</span>
+                                            </button>
+                                        </div>
                                     )}
 
                                     {/* Password input for camera mode */}
@@ -729,7 +745,11 @@ function QRCode() {
                                                 type={showExtractPassword ? "text" : "password"}
                                                 placeholder="Enter password before scanning"
                                                 value={extractPassword}
-                                                onChange={(e) => setExtractPassword(e.target.value)}
+                                                onChange={(e) => {
+                                                    setExtractPassword(e.target.value)
+                                                    setExtractError('')
+                                                    if (clearCooldown) clearCooldown()
+                                                }}
                                             />
                                             {extractPassword && (
                                                 <button

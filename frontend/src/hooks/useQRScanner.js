@@ -20,6 +20,11 @@ export function useQRScanner(isActive, onQRDetected, onError) {
     const lastScanTimeRef = useRef(0)
     const SCAN_INTERVAL = 100 // scan every 100ms
 
+    // Deduplication & cooldown to prevent flooding server
+    const lastScannedDataRef = useRef(null)
+    const lastScannedTimeRef = useRef(0)
+    const SCAN_COOLDOWN_MS = 3000 // 3 seconds cooldown before re-scanning the exact same QR code
+
     // Use callback refs to ensure we always have latest values
     const onQRDetectedRef = useRef(onQRDetected)
     const onErrorRef = useRef(onError)
@@ -49,11 +54,17 @@ export function useQRScanner(isActive, onQRDetected, onError) {
     }, [])
 
     const scanFrame = useCallback(() => {
+        if (!streamRef.current) {
+            return
+        }
+
         const video = videoRef.current
         const canvas = canvasRef.current
 
         if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
-            animationFrameRef.current = requestAnimationFrame(scanFrame)
+            if (streamRef.current) {
+                animationFrameRef.current = requestAnimationFrame(scanFrame)
+            }
             return
         }
 
@@ -80,11 +91,18 @@ export function useQRScanner(isActive, onQRDetected, onError) {
             })
 
             if (code && !isProcessingRef.current) {
-                console.log('[QR Scanner] QR Code detected locally:', code.data)
+                const now = Date.now()
+                const isSameCode = lastScannedDataRef.current === code.data
+                const isCoolingDown = now - lastScannedTimeRef.current < SCAN_COOLDOWN_MS
+
                 setBoundingBox(code.location)
 
-                if (onQRDetectedRef.current) {
+                if ((!isSameCode || !isCoolingDown) && onQRDetectedRef.current) {
+                    console.log('[QR Scanner] QR Code detected locally:', code.data)
+                    lastScannedDataRef.current = code.data
+                    lastScannedTimeRef.current = now
                     isProcessingRef.current = true
+
                     // Pass a wrapper so callers can access both the image blob
                     // and the decoded QR string without mutating the native Blob object.
                     canvas.toBlob((blob) => {
@@ -106,7 +124,9 @@ export function useQRScanner(isActive, onQRDetected, onError) {
             console.error('[QR Scanner] Frame scan error:', err)
         }
 
-        animationFrameRef.current = requestAnimationFrame(scanFrame)
+        if (streamRef.current) {
+            animationFrameRef.current = requestAnimationFrame(scanFrame)
+        }
     }, [])
 
     const startScanning = useCallback(async () => {
@@ -114,6 +134,12 @@ export function useQRScanner(isActive, onQRDetected, onError) {
             console.log('[QR Scanner] Starting camera access...')
             setError(null)
             setBoundingBox(null)
+
+            // Clean up any existing stream before acquiring a new one
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop())
+                streamRef.current = null
+            }
 
             if (!window.isSecureContext) {
                 throw new Error('Camera requires HTTPS or localhost.')
@@ -190,10 +216,23 @@ export function useQRScanner(isActive, onQRDetected, onError) {
         }
     }, [isActive, startScanning, stopScanning])
 
+    const clearCooldown = useCallback(() => {
+        lastScannedDataRef.current = null
+        lastScannedTimeRef.current = 0
+    }, [])
+
     const reset = () => {
         setError(null)
         setBoundingBox(null)
-        if (isActive) startScanning()
+        clearCooldown()
+        isProcessingRef.current = false
+        if (isActive) {
+            if (!streamRef.current) {
+                startScanning()
+            } else if (!animationFrameRef.current) {
+                animationFrameRef.current = requestAnimationFrame(scanFrame)
+            }
+        }
     }
 
     return {
@@ -203,6 +242,7 @@ export function useQRScanner(isActive, onQRDetected, onError) {
         isScanning,
         boundingBox,
         reset,
-        stopScanning
+        stopScanning,
+        clearCooldown,
     }
 }
