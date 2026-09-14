@@ -15,6 +15,8 @@ import os
 import shutil
 import tempfile
 import unittest
+import unittest.mock
+import zipfile
 from PIL import Image
 import numpy as np
 
@@ -115,6 +117,7 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
         dl_resp = self.client.get(f"/api/download/{download_id}")
         self.assertEqual(dl_resp.status_code, 200)
         stego_bytes = dl_resp.data
+        dl_resp.close()
 
         # Post back to /api/extract
         ext_resp = self.client.post(
@@ -233,6 +236,7 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
         # Verify downloading with this download_id succeeds
         dl_resp = self.client.get(f"/api/polyglot/download/{download_id}")
         self.assertEqual(dl_resp.status_code, 200)
+        dl_resp.close()
 
     # -------------------------------------------------------------------------
     # 3. QR Stego Tests
@@ -372,6 +376,250 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
         self.assertIn("http://localhost:3000", origins)
         self.assertIn("http://127.0.0.1:3000", origins)
 
+    # -------------------------------------------------------------------------
+    # 6. Audit Regression Tests (F-01 through F-11)
+    # -------------------------------------------------------------------------
+
+    def test_calculate_capacity_stream_zero_disk_io(self):
+        """Verify /api/calculate-capacity calculates capacity without writing to disk (F-05)."""
+        carrier_path = self._create_test_image("capacity_test.png", 200, 200)
+        upload_folder = self.app.config['UPLOAD_FOLDER']
+        files_before = set(os.listdir(upload_folder))
+
+        with open(carrier_path, "rb") as f:
+            resp = self.client.post(
+                "/api/calculate-capacity",
+                data={"image": (f, "capacity_test.png")},
+                content_type="multipart/form-data"
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn("totalCapacityBytes", data)
+        self.assertGreater(data["totalCapacityBytes"], 0)
+
+        # Confirm zero disk leak in uploads directory
+        files_after = set(os.listdir(upload_folder))
+        self.assertEqual(files_before, files_after)
+
+    def test_windows_file_cleanup_no_lock_leaks(self):
+        """Verify uploaded temporary files are removed without Windows file locks (F-02)."""
+        carrier_path = self._create_test_image("cleanup_carrier.png", 250, 250)
+        secret_content = b"Content to test Windows file cleanup without locks."
+        upload_folder = self.app.config['UPLOAD_FOLDER']
+
+        # Count files before hide
+        before_hide = set(os.listdir(upload_folder))
+
+        with open(carrier_path, "rb") as cf:
+            resp = self.client.post(
+                "/api/hide",
+                data={
+                    "image": (cf, "carrier.png"),
+                    "file": (io.BytesIO(secret_content), "secret.txt"),
+                },
+                content_type="multipart/form-data"
+            )
+        self.assertEqual(resp.status_code, 200)
+        download_id = resp.get_json()["download_id"]
+
+        # Only the download output file should have been added; input temp files must be gone
+        after_hide = set(os.listdir(upload_folder))
+        new_files = after_hide - before_hide
+        self.assertEqual(new_files, {download_id})
+
+        # Fetch download output
+        dl_resp = self.client.get(f"/api/download/{download_id}")
+        self.assertEqual(dl_resp.status_code, 200)
+        stego_bytes = dl_resp.data
+        dl_resp.close()
+
+        # Test extraction cleanup
+        before_extract = set(os.listdir(upload_folder))
+        ext_resp = self.client.post(
+            "/api/extract",
+            data={"image": (io.BytesIO(stego_bytes), "stego.png")},
+            content_type="multipart/form-data"
+        )
+        self.assertEqual(ext_resp.status_code, 200)
+        self.assertEqual(ext_resp.data, secret_content)
+
+        # Uploaded image for extract should be completely cleaned up
+        after_extract = set(os.listdir(upload_folder))
+        self.assertEqual(before_extract, after_extract)
+
+    def test_polyglot_zip_bomb_guard(self):
+        """Verify polyglot extraction rejects entries that decompress beyond limit (F-04)."""
+        poly_file = os.path.join(self.temp_dir, "bomb_polyglot.png")
+        carrier_path = self._create_test_image("bomb_carrier.png", 100, 100)
+
+        # Construct a zip containing 51MB of zeroes (compresses to ~50KB)
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("large_file.bin", b"\x00" * (51 * 1024 * 1024))
+        zip_bytes = zip_buf.getvalue()
+
+        # Concatenate carrier and zip to form polyglot
+        with open(carrier_path, "rb") as cf, open(poly_file, "wb") as pf:
+            pf.write(cf.read() + zip_bytes)
+
+        # Extraction must reject with safe error
+        with self.assertRaises(ValueError) as ctx:
+            extract_from_polyglot(poly_file)
+        self.assertIn("exceeds", str(ctx.exception).lower())
+
+    def test_proxyfix_real_ip_and_hsts(self):
+        """Verify ProxyFix respects X-Forwarded headers and enables HSTS in production (F-03)."""
+        with unittest.mock.patch.dict(os.environ, {
+            "SECRET_KEY": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "CORS_ORIGINS": "https://invisio-vault.vercel.app"
+        }):
+            prod_app = create_app('production')
+            prod_app.config['TESTING'] = True
+            try:
+                client = prod_app.test_client()
+
+                # Plain HTTP request
+                resp_http = client.get("/", headers={"X-Forwarded-Proto": "http"})
+                self.assertNotIn("Strict-Transport-Security", resp_http.headers)
+
+                # Proxied HTTPS request
+                resp_https = client.get(
+                    "/",
+                    headers={
+                        "X-Forwarded-Proto": "https",
+                        "X-Forwarded-For": "198.51.100.42"
+                    }
+                )
+                self.assertIn("Strict-Transport-Security", resp_https.headers)
+                self.assertIn("max-age=31536000", resp_https.headers["Strict-Transport-Security"])
+            finally:
+                for h in prod_app.logger.handlers[:]:
+                    h.close()
+                    prod_app.logger.removeHandler(h)
+
+    def test_qr_logging_does_not_leak_secrets(self):
+        """Verify QR extraction does not leak raw plaintext or hidden secrets in logs (F-01)."""
+        qr_output = os.path.join(self.temp_dir, "test_qr_leak.png")
+        public_url = "https://invisiovault.app/test"
+        secret_super_private = "CONFIDENTIAL_API_KEY_NEVER_LOG"
+
+        generate_qr_with_stego(
+            public_data=public_url,
+            secret_text=secret_super_private,
+            output_path=qr_output,
+            password=None,
+            scale=10
+        )
+
+        with self.assertLogs("utils.qr_stego", level="INFO") as log_ctx:
+            pub, sec = extract_from_qr_stego(qr_output, password=None)
+            self.assertEqual(sec, secret_super_private)
+
+        # Check all logged messages: secret must never appear
+        for msg in log_ctx.output:
+            self.assertNotIn(secret_super_private, msg)
+
+    def test_polyglot_input_validation(self):
+        """Verify polyglot endpoints reject empty files or missing inputs (F-06)."""
+        # Missing carrier
+        resp = self.client.post(
+            "/api/polyglot/create",
+            data={"file": (io.BytesIO(b"data"), "file.txt")},
+            content_type="multipart/form-data"
+        )
+        self.assertEqual(resp.status_code, 400)
+
+        # Empty carrier
+        resp = self.client.post(
+            "/api/polyglot/create",
+            data={
+                "carrier": (io.BytesIO(b""), "empty.png"),
+                "file": (io.BytesIO(b"data"), "file.txt")
+            },
+            content_type="multipart/form-data"
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("empty", resp.get_json().get("error", "").lower())
+
+        # Empty polyglot for extract
+        resp = self.client.post(
+            "/api/polyglot/extract",
+            data={"file": (io.BytesIO(b""), "empty.png")},
+            content_type="multipart/form-data"
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("empty", resp.get_json().get("error", "").lower())
+
+    def test_qr_capacity_calculation(self):
+        """Verify /api/qr/capacity returns authentic QR matrix capacity (F-10)."""
+        resp = self.client.post(
+            "/api/qr/capacity",
+            data={"public_data": "https://invisiovault.app"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        cap = data.get("totalCapacityBytes")
+        self.assertIsInstance(cap, int)
+        # Authentic QR payload capacity is well under 1273 bytes (not the erroneous 90,000 bytes)
+        self.assertLessEqual(cap, 1273)
+        self.assertGreater(cap, 500)
+
+    def test_pipe_in_filename_metadata_preservation(self):
+        """Verify filenames containing pipe character '|' are preserved without corrupting mime type."""
+        carrier_path = self._create_test_image("pipe_carrier.png", 250, 250)
+        secret_content = b"Content with pipe in filename."
+        secret_file = os.path.join(self.temp_dir, "report.txt")
+        with open(secret_file, "wb") as f:
+            f.write(secret_content)
+
+        output_stego = os.path.join(self.temp_dir, "output_pipe_stego.png")
+        pipe_filename = "classified|2026|final.txt"
+        hide_file_in_image(
+            carrier_path,
+            secret_file,
+            output_stego,
+            password=None,
+            original_filename=pipe_filename
+        )
+
+        extracted_data, ext_filename, mime = extract_file_from_image(output_stego)
+        self.assertEqual(extracted_data, secret_content)
+        self.assertEqual(ext_filename, pipe_filename)
+        self.assertEqual(mime, "text/plain")
+
+    def test_password_with_whitespace_end_to_end(self):
+        """Verify passwords with leading/trailing spaces are preserved identically across hide and scan."""
+        qr_output = os.path.join(self.temp_dir, "whitespace_pwd_qr.png")
+        pwd_with_spaces = "  my secret pass 2026  "
+        secret_msg = "Confidential message with whitespace password."
+
+        # Test QR generation and scan
+        generate_qr_with_stego(
+            public_data="https://invisiovault.app",
+            secret_text=secret_msg,
+            output_path=qr_output,
+            password=pwd_with_spaces,
+            scale=10
+        )
+
+        pub_ext, sec_ext = extract_from_qr_stego(qr_output, password=pwd_with_spaces)
+        self.assertEqual(sec_ext, secret_msg)
+
+    def test_qr_endpoints_safe_scale_handling(self):
+        """Verify invalid or empty scale strings fall back safely to defaults without errors."""
+        resp_cap = self.client.post(
+            "/api/qr/capacity",
+            data={"public_data": "https://example.com", "scale": ""}
+        )
+        self.assertEqual(resp_cap.status_code, 200)
+
+        resp_cap_invalid = self.client.post(
+            "/api/qr/capacity",
+            data={"public_data": "https://example.com", "scale": "not-an-int"}
+        )
+        self.assertEqual(resp_cap_invalid.status_code, 200)
+
 
 if __name__ == '__main__':
     unittest.main()
+

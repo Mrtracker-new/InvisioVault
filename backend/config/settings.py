@@ -17,6 +17,8 @@ class Config:
     def validate_secret_key(cls):
         """Validate that SECRET_KEY is properly set."""
         if not cls.SECRET_KEY:
+            cls.SECRET_KEY = os.getenv('SECRET_KEY')
+        if not cls.SECRET_KEY:
             raise ValueError(
                 "SECRET_KEY environment variable is not set! "
                 "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
@@ -64,7 +66,7 @@ class Config:
         return [o.strip() for o in origins]
     
     # Upload settings
-    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', '/tmp/uploads')
+    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
     
     # File size limits (in bytes)
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB - for carrier images
@@ -76,14 +78,15 @@ class Config:
     CORS_ORIGINS = []  # Will be set after validation
     
     # Logging
-    LOG_FILE = os.getenv('LOG_FILE', '/tmp/app.log')
+    LOG_FILE = os.getenv('LOG_FILE', 'app.log')
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     
     @staticmethod
     def init_app(app):
         """Initialize application configuration."""
         # Ensure upload folder exists
-        Path(Config.UPLOAD_FOLDER).mkdir(parents=True, exist_ok=True)
+        upload_folder = app.config.get('UPLOAD_FOLDER') or 'uploads'
+        Path(upload_folder).mkdir(parents=True, exist_ok=True)
         
         # Validate and set CORS origins
         # Read from environment variable OR use class default
@@ -106,7 +109,7 @@ class Config:
 class DevelopmentConfig(Config):
     """Development configuration."""
     DEBUG = True
-    UPLOAD_FOLDER = 'uploads'
+    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
     
     # Default CORS for local development
     _cors_origins_raw = 'http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000'
@@ -119,6 +122,7 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     """Production configuration."""
     DEBUG = False
+    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
     
     # Production MUST have SECRET_KEY set - no fallback!
     # Validation happens in init_app()

@@ -115,8 +115,8 @@ function HideFile() {
         formData.append('text', text.trim())
       }
 
-      if (trimmedPassword) {
-        formData.append('password', trimmedPassword)
+      if (password) {
+        formData.append('password', password)
       }
 
       const response = await axios.post(`${API_URL}/api/hide`, formData, {

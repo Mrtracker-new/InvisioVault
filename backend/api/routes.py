@@ -11,6 +11,7 @@ import logging
 import hashlib
 import re
 import time
+import threading
 
 # Import the shared limiter instance (created in extensions.py without a bound
 # app so it can be imported here before the app factory runs).  This is the
@@ -41,8 +42,11 @@ logger = logging.getLogger(__name__)
 # cannot use a chosen-prefix collision to poison another frame's cached
 # detection result.
 qr_detection_cache = OrderedDict()
+_qr_cache_lock = threading.Lock()
 _QR_CACHE_MAX = 256
 _QR_CACHE_TTL_SECONDS = 5
+
+_SAFE_MIME_RE = re.compile(r'^[a-zA-Z0-9!#$&^_.+-]+/[a-zA-Z0-9!#$&^_.+-]+$')
 
 
 # Security: Sanitize error messages for production
@@ -192,37 +196,23 @@ def calculate_capacity():
         
         # Validate image
         validate_image(image)
-        
-        # Save image temporarily
-        upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        
-        image_filename = secure_filename(image.filename)
-        image_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{image_filename}")
-        image.save(image_path)
-        
-        try:
-            # Open image and calculate capacity.
-            # Use img.width * img.height instead of materialising the pixel
-            # data just for a count — O(1) vs O(pixels).
-            img = Image.open(image_path).convert("RGB")
+
+        # Read dimensions directly from stream (header-only, zero disk I/O, zero RGB conversion)
+        image.stream.seek(0)
+        with Image.open(image.stream) as img:
             total_pixels = img.width * img.height
+        image.stream.seek(0)
 
-            # Capacity calculation: 3 bits per pixel (1 bit per RGB channel)
-            # Divided by 8 to convert bits to bytes
-            total_capacity_bytes = (total_pixels * 3) // 8
+        # Capacity calculation: 3 bits per pixel (1 bit per RGB channel)
+        # Divided by 8 to convert bits to bytes
+        total_capacity_bytes = (total_pixels * 3) // 8
 
-            logger.info(f"Calculated capacity for image: {total_capacity_bytes} bytes")
+        logger.info(f"Calculated capacity for image: {total_capacity_bytes} bytes")
 
-            return jsonify({
-                'totalCapacityBytes': total_capacity_bytes,
-                'totalCapacityFormatted': _format_bytes(total_capacity_bytes)
-            }), 200
-            
-        finally:
-            # Clean up temporary file
-            if os.path.exists(image_path):
-                os.remove(image_path)
+        return jsonify({
+            'totalCapacityBytes': total_capacity_bytes,
+            'totalCapacityFormatted': _format_bytes(total_capacity_bytes)
+        }), 200
     
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
@@ -250,7 +240,7 @@ def hide_file():
         image = request.files.get('image')
         file_to_hide = request.files.get('file')
         text_to_hide = request.form.get('text', '').strip()
-        password = request.form.get('password', '').strip() or None
+        password = request.form.get('password') or None
 
         if not image:
             return jsonify({'error': 'Image is required'}), 400
@@ -359,7 +349,7 @@ def extract_file():
     try:
         # Validate request
         image = request.files.get('image')
-        password = request.form.get('password', '').strip() or None
+        password = request.form.get('password') or None
 
         if not image:
             return jsonify({'error': 'Image file is required'}), 400
@@ -387,10 +377,11 @@ def extract_file():
         # Sanitize filename from untrusted stego metadata to prevent
         # Content-Disposition header injection / path traversal (P0-03)
         safe_filename = _safe_download_name(original_filename)
-        logger.info(f"Successfully extracted file: {safe_filename}")
+        safe_mime = mime_type if (mime_type and _SAFE_MIME_RE.match(mime_type)) else "application/octet-stream"
+        logger.info(f"Successfully extracted file: {safe_filename} (mimetype: {safe_mime})")
         return send_file(
             output,
-            mimetype=mime_type,
+            mimetype=safe_mime,
             as_attachment=True,
             download_name=safe_filename
         )
@@ -424,10 +415,30 @@ def create_polyglot_file():
         # Validate request
         carrier_file = request.files.get('carrier')
         file_to_hide = request.files.get('file')
-        password = request.form.get('password', '').strip() or None
+        password = request.form.get('password') or None
 
-        if not carrier_file or not file_to_hide:
+        if not carrier_file or not carrier_file.filename:
             return jsonify({'error': 'Both carrier and file are required'}), 400
+
+        if not file_to_hide or not file_to_hide.filename:
+            return jsonify({'error': 'Both carrier and file are required'}), 400
+
+        # Validate non-empty content and size limits
+        carrier_file.stream.seek(0, 2)
+        carrier_size = carrier_file.stream.tell()
+        carrier_file.stream.seek(0)
+        if carrier_size == 0:
+            return jsonify({'error': 'Carrier file cannot be empty'}), 400
+        if carrier_size > current_app.config['MAX_CONTENT_LENGTH']:
+            return jsonify({'error': 'Carrier file exceeds maximum allowed size'}), 400
+
+        file_to_hide.stream.seek(0, 2)
+        file_size = file_to_hide.stream.tell()
+        file_to_hide.stream.seek(0)
+        if file_size == 0:
+            return jsonify({'error': 'File to hide cannot be empty'}), 400
+        if file_size > current_app.config['MAX_HIDEABLE_FILE_SIZE']:
+            return jsonify({'error': 'File to hide exceeds maximum allowed size'}), 400
 
         # Enforce minimum password length (P2-02)
         if password is not None and len(password) < MIN_PASSWORD_LENGTH:
@@ -518,10 +529,18 @@ def extract_from_polyglot_file():
     try:
         # Validate request
         polyglot_file = request.files.get('file')
-        password = request.form.get('password', '').strip() or None
+        password = request.form.get('password') or None
 
-        if not polyglot_file:
+        if not polyglot_file or not polyglot_file.filename:
             return jsonify({'error': 'Polyglot file is required'}), 400
+
+        polyglot_file.stream.seek(0, 2)
+        poly_size = polyglot_file.stream.tell()
+        polyglot_file.stream.seek(0)
+        if poly_size == 0:
+            return jsonify({'error': 'Polyglot file cannot be empty'}), 400
+        if poly_size > current_app.config['MAX_CONTENT_LENGTH']:
+            return jsonify({'error': 'Polyglot file exceeds maximum allowed size'}), 400
 
         # Save file temporarily
         upload_folder = current_app.config['UPLOAD_FOLDER']
@@ -577,10 +596,13 @@ def generate_qr_code():
         # Validate request
         public_data = request.form.get('public_data', '').strip()
         secret_text = request.form.get('secret_text', '').strip()
-        password = request.form.get('password', '').strip() or None
+        password = request.form.get('password') or None
         fg_color = request.form.get('fg_color', '#000000').strip()
         bg_color = request.form.get('bg_color', '#FFFFFF').strip()
-        scale = int(request.form.get('scale', 10))
+        try:
+            scale = int(request.form.get('scale') or 10)
+        except (ValueError, TypeError):
+            scale = 10
         
         if not public_data:
             return jsonify({'error': 'Public data (QR content) is required'}), 400
@@ -698,7 +720,7 @@ def scan_qr_code():
     try:
         # Validate request
         qr_image = request.files.get('image')
-        password = request.form.get('password', '').strip() or None
+        password = request.form.get('password') or None
         
         logger.info(f'QR scan: Request received, password provided: {password is not None}')
         
@@ -756,51 +778,11 @@ def scan_qr_code():
 @api.route('/qr/extract', methods=['POST'])
 @limiter.limit("20 per hour", override_defaults=False)
 def extract_qr_manual():
-    """Manually extract hidden data from QR code (with password).
+    """Manually extract hidden data from QR code (alias for /qr/scan).
 
-    Same cost and risk profile as /qr/scan — same 20/hour limit.
+    Maintained for backward compatibility; delegates directly to scan_qr_code().
     """
-    try:
-        # Validate request
-        qr_image = request.files.get('image')
-        password = request.form.get('password', '').strip() or None
-        
-        if not qr_image:
-            return jsonify({'error': 'QR code image is required'}), 400
-        
-        validate_image(qr_image)
-        
-        # Save image temporarily
-        upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        
-        qr_filename = secure_filename(qr_image.filename)
-        qr_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{qr_filename}")
-        qr_image.save(qr_path)
-        
-        try:
-            # Extract both public and secret data
-            public_data, secret_data = extract_from_qr_stego(qr_path, password)
-            
-            logger.info(f"Successfully extracted from QR code")
-            return jsonify({
-                'success': True,
-                'publicData': public_data,
-                'secretData': secret_data
-            }), 200
-        finally:
-            # Clean up
-            if os.path.exists(qr_path):
-                os.remove(qr_path)
-    
-    except ValueError as e:
-        logger.error(f"QR extraction error: {str(e)}")
-        safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
-        return jsonify({'error': safe_error}), 400
-    except Exception as e:
-        logger.error(f"Error extracting from QR code: {str(e)}")
-        safe_error = sanitize_error('An error occurred while extracting data', current_app.config['DEBUG'])
-        return jsonify({'error': safe_error}), 500
+    return scan_qr_code()
 
 
 @api.route('/qr/capacity', methods=['POST'])
@@ -813,7 +795,10 @@ def qr_capacity():
     """
     try:
         public_data = request.form.get('public_data', '')
-        scale = int(request.form.get('scale', 15))
+        try:
+            scale = int(request.form.get('scale') or 15)
+        except (ValueError, TypeError):
+            scale = 15
 
         capacity = calculate_qr_capacity(public_data, scale)
 
@@ -831,19 +816,7 @@ def qr_capacity():
 @api.route('/qr/detect', methods=['POST'])
 @limiter.limit("60 per minute")
 def detect_qr():
-    """Quick QR detection endpoint for camera scanner - just checks if QR exists.
-
-    The camera scanner polls this endpoint at up to 2 fps (every 500 ms).
-    A tighter per-route limit of 60 req/min per IP is applied via the decorator
-    above.  This must be declared HERE — before blueprint registration resolves
-    the endpoint name to 'api.detect_qr' — so flask-limiter correctly enforces
-    the limit.  Calling limiter.limit()() on a view function *after*
-    register_blueprint() operates on the raw function object rather than the
-    registered endpoint name and may silently not be enforced (undefined
-    behaviour in flask-limiter 3.x).  See extensions.py for the shared limiter
-    instance and app.py for limiter.init_app().
-    """
-    filepath = None
+    """Quick QR detection endpoint for camera scanner - just checks if QR exists."""
     try:
         # Validate image file is present
         if 'image' not in request.files:
@@ -856,66 +829,46 @@ def detect_qr():
             logger.debug('QR detection: Empty image file')
             return jsonify({'detected': False}), 200
         
-        # Hash for deduplication.  SHA-256 (not MD5): collision resistance
-        # matters here because a cache hit returns another request's cached
-        # response.
+        # Hash for deduplication. SHA-256 collision resistance prevents poisoning.
         image_data = image_file.read()
         image_hash = hashlib.sha256(image_data).hexdigest()
         current_time = time.time()
 
-        # Clean up expired cache entries
-        expired_keys = [k for k, v in qr_detection_cache.items()
-                        if current_time - v[0] > _QR_CACHE_TTL_SECONDS]
-        for k in expired_keys:
-            del qr_detection_cache[k]
-            logger.debug(f'QR detection: Cleaned up expired cache entry {k[:8]}...')
-        
-        # Check cache for recent identical request (within 1 second)
-        if image_hash in qr_detection_cache:
-            cache_timestamp, cached_response = qr_detection_cache[image_hash]
-            if current_time - cache_timestamp < 1.0:
-                logger.debug(f'QR detection: Cache hit for hash {image_hash[:8]}...')
-                return jsonify(cached_response), 200
-        
-        # Reset file pointer after reading for hash
-        image_file.seek(0)
-        
-        # Create upload folder if it doesn't exist
-        upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        
-        # Save temporarily with unique filename
-        filename = f"detect_{uuid.uuid4().hex}.png"
-        filepath = os.path.join(upload_folder, filename)
-        
-        try:
-            image_file.save(filepath)
-            logger.debug(f'QR detection: Saved temp file {filename}')
-        except Exception as save_error:
-            logger.error(f'QR detection: Failed to save image - {str(save_error)}')
-            return jsonify({'detected': False}), 200
-        
-        # Try to decode QR code
+        with _qr_cache_lock:
+            # Clean up expired cache entries
+            expired_keys = [k for k, v in qr_detection_cache.items()
+                            if current_time - v[0] > _QR_CACHE_TTL_SECONDS]
+            for k in expired_keys:
+                del qr_detection_cache[k]
+                logger.debug(f'QR detection: Cleaned up expired cache entry {k[:8]}...')
+            
+            # Check cache for recent identical request (within 1 second)
+            if image_hash in qr_detection_cache:
+                cache_timestamp, cached_response = qr_detection_cache[image_hash]
+                if current_time - cache_timestamp < 1.0:
+                    logger.debug(f'QR detection: Cache hit for hash {image_hash[:8]}...')
+                    return jsonify(cached_response), 200
+
+        # Try to decode QR code directly in memory (zero disk I/O, zero file locks)
         try:
             import importlib
             zxingcpp = importlib.import_module("zxingcpp")
             
-            # Open and decode the image
-            img = Image.open(filepath)
-            decoded_objects = zxingcpp.read_barcodes(img)
+            stream_buf = BytesIO(image_data)
+            with Image.open(stream_buf) as img:
+                decoded_objects = zxingcpp.read_barcodes(img)
             detected = len(decoded_objects) > 0
             
             if detected:
-                logger.info(f'QR detection: QR code detected in frame')
+                logger.info('QR detection: QR code detected in frame')
             else:
                 logger.debug('QR detection: No QR code in frame')
             
-            # Cache the response; evict oldest entries past the hard cap so
-            # the dict stays bounded even under a multi-IP request burst.
             response_data = {'detected': detected, 'success': True}
-            qr_detection_cache[image_hash] = (current_time, response_data)
-            while len(qr_detection_cache) > _QR_CACHE_MAX:
-                qr_detection_cache.popitem(last=False)
+            with _qr_cache_lock:
+                qr_detection_cache[image_hash] = (current_time, response_data)
+                while len(qr_detection_cache) > _QR_CACHE_MAX:
+                    qr_detection_cache.popitem(last=False)
             logger.debug(f'QR detection: Cached response for hash {image_hash[:8]}...')
             
             return jsonify(response_data), 200
@@ -934,15 +887,6 @@ def detect_qr():
     except Exception as e:
         logger.error(f'QR detection: Unexpected error - {str(e)}', exc_info=True)
         return jsonify({'detected': False}), 200
-        
-    finally:
-        # Always clean up temporary file
-        if filepath and os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-                logger.debug(f'QR detection: Cleaned up temp file')
-            except Exception as cleanup_error:
-                logger.warning(f'QR detection: Failed to clean up {filepath} - {str(cleanup_error)}')
 
 
 @api.errorhandler(413)

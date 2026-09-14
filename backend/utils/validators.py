@@ -181,8 +181,8 @@ def validate_image(file: FileStorage, max_size: int = MAX_IMAGE_SIZE) -> None:
     # without fully decompressing pixel data — fast and safe.
     try:
         file.stream.seek(0)
-        img = Image.open(file.stream)
-        img.verify()  # raises if the structure is broken / adversarial
+        with Image.open(file.stream) as img:
+            img.verify()  # raises if the structure is broken / adversarial
     except Image.DecompressionBombError:
         raise ValueError(
             f"Image dimensions exceed the maximum supported size "
@@ -210,15 +210,15 @@ def validate_image(file: FileStorage, max_size: int = MAX_IMAGE_SIZE) -> None:
     # we re-open to read dimensions.  This is a cheap header-only parse.
     try:
         file.stream.seek(0)
-        img = Image.open(file.stream)
-        width, height = img.size
-        pixel_count = width * height
-        if pixel_count > MAX_PIXEL_COUNT:
-            raise ValueError(
-                f"Image is too large ({width}×{height} = "
-                f"{pixel_count:,} pixels). Maximum is "
-                f"{MAX_PIXEL_COUNT:,} pixels."
-            )
+        with Image.open(file.stream) as img:
+            width, height = img.size
+            pixel_count = width * height
+            if pixel_count > MAX_PIXEL_COUNT:
+                raise ValueError(
+                    f"Image is too large ({width}×{height} = "
+                    f"{pixel_count:,} pixels). Maximum is "
+                    f"{MAX_PIXEL_COUNT:,} pixels."
+                )
     except ValueError:
         raise  # re-raise our own ValueError
     except Exception as exc:

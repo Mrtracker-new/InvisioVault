@@ -218,7 +218,7 @@ def _ecc_encode(data: bytes) -> bytes:
     if not _ECC_AVAILABLE or RSCodec is None or len(data) == 0:
         return data
     rs = RSCodec(32)  # 32 parity bytes per ~223-byte block
-    return rs.encode(data)
+    return bytes(rs.encode(data))
 
 
 def _ecc_decode(data: bytes) -> bytes:
@@ -227,7 +227,7 @@ def _ecc_decode(data: bytes) -> bytes:
     rs = RSCodec(32)
     try:
         decoded, *_ = rs.decode(data)
-        return decoded
+        return bytes(decoded)
     except Exception:
         raise ValueError("ECC decoding failed — too many errors or corrupted data.")
 
@@ -432,21 +432,27 @@ def hide_file_in_image(
     - Original PNG metadata (text chunks, EXIF) is preserved.
     """
     # ── Open image, preserve metadata ─────────────────────────────────────────
-    original_img = Image.open(image_path)
-    original_info = original_img.info.copy() if original_img.format == "PNG" else {}
-    # Payload is embedded only in the RGB channels; an alpha channel (if any)
-    # is preserved untouched.  Work in RGB for embedding.
-    has_alpha = original_img.mode in ("RGBA", "LA", "PA")
-    alpha_arr = None
-    if has_alpha:
-        rgba = original_img.convert("RGBA")
-        rgb_arr = np.asarray(rgba, dtype=np.uint8)[:, :, :3].copy()
-        alpha_arr = np.asarray(rgba, dtype=np.uint8)[:, :, 3].copy()
-        width, height = rgba.width, rgba.height
-    else:
-        rgb_img = original_img.convert("RGB")
-        rgb_arr = np.asarray(rgb_img, dtype=np.uint8).copy()
-        width, height = rgb_img.width, rgb_img.height
+    with Image.open(image_path) as original_img:
+        original_info = original_img.info.copy() if original_img.format == "PNG" else {}
+        # Payload is embedded only in the RGB channels; an alpha channel (if any)
+        # is preserved untouched.  Work in RGB for embedding.
+        has_alpha = original_img.mode in ("RGBA", "LA", "PA")
+        alpha_arr = None
+        if has_alpha:
+            rgba = original_img.convert("RGBA")
+            try:
+                rgb_arr = np.asarray(rgba, dtype=np.uint8)[:, :, :3].copy()
+                alpha_arr = np.asarray(rgba, dtype=np.uint8)[:, :, 3].copy()
+                width, height = rgba.width, rgba.height
+            finally:
+                rgba.close()
+        else:
+            rgb_img = original_img.convert("RGB")
+            try:
+                rgb_arr = np.asarray(rgb_img, dtype=np.uint8).copy()
+                width, height = rgb_img.width, rgb_img.height
+            finally:
+                rgb_img.close()
     total_pixels = width * height
     if total_pixels > (_MAX_PAYLOAD_BYTES * 8 // 3):
         raise ValueError("Host image dimensions exceed the maximum supported size.")
@@ -566,13 +572,16 @@ def hide_file_in_image(
             pnginfo.add_text(k, v, zip=False)
     exif = original_info.get("exif")
 
-    host_img.save(
-        output_path, "PNG",
-        optimize=False,
-        compress_level=9,
-        pnginfo=pnginfo,
-        exif=exif,
-    )
+    try:
+        host_img.save(
+            output_path, "PNG",
+            optimize=False,
+            compress_level=9,
+            pnginfo=pnginfo,
+            exif=exif,
+        )
+    finally:
+        host_img.close()
     return output_path
 
 
@@ -586,15 +595,15 @@ def extract_file_from_image(
     # return an int (or 4-tuple), crashing pixel[:3] in _iter_lsb_bytes /
     # _compute_edge_scores with a 500.  RGBA→RGB drops alpha without
     # blending, so the embedded RGB channels are read back unchanged.
-    img = Image.open(image_path)
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    width, height = img.width, img.height
-    total_channels = width * height * 3
-    max_carriable = total_channels // 8
+    with Image.open(image_path) as raw_img:
+        img = raw_img.convert("RGB") if raw_img.mode != "RGB" else raw_img.copy()
 
-    gen_seq = _iter_lsb_bytes(img)
     try:
+        width, height = img.width, img.height
+        total_channels = width * height * 3
+        max_carriable = total_channels // 8
+
+        gen_seq = _iter_lsb_bytes(img)
         first_two = _read_exactly(gen_seq, 2, "version header")
 
         if first_two == _V2_MAGIC:
@@ -767,7 +776,7 @@ def extract_file_from_image(
             raise ValueError("Metadata is not valid UTF-8. The image may be corrupted.")
         if "|" not in metadata:
             raise ValueError("Metadata malformed (missing separator).")
-        original_filename, mime_type = metadata.split("|", 1)
+        original_filename, mime_type = metadata.rsplit("|", 1)
 
         # ── Reverse payload processing: (decrypt) → ECC decode → decompress ───
         # For new adaptive flags: payload is ECC(compressed(data)) [possibly encrypted]
@@ -789,3 +798,5 @@ def extract_file_from_image(
         raise
     except Exception as exc:
         raise ValueError(f"Failed to extract file: {exc}") from exc
+    finally:
+        img.close()

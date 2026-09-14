@@ -68,15 +68,26 @@ def create_app(config_name='default'):
     #   all others  : global 200/day + 100/hour  (extensions.py Limiter ctor)
     limiter.init_app(app)
 
+    # Apply ProxyFix when behind reverse proxies (Render, Cloudflare, etc.)
+    # so that request.remote_addr reflects the true client IP (fixing global rate limit lockouts)
+    # and request.is_secure accurately reflects HTTPS (enabling HSTS headers).
+    if not app.config.get('DEBUG') or os.getenv('BEHIND_PROXY', 'False').lower() == 'true':
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     
     # Setup logging
+    log_handlers = [logging.StreamHandler()]
+    log_file = app.config.get('LOG_FILE')
+    if log_file:
+        log_dir = os.path.dirname(os.path.abspath(log_file))
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        log_handlers.append(logging.FileHandler(log_file, encoding='utf-8'))
+
     logging.basicConfig(
         level=getattr(logging, app.config['LOG_LEVEL']),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(app.config['LOG_FILE']),
-            logging.StreamHandler()
-        ]
+        handlers=log_handlers
     )
     
     # Add security headers to all responses

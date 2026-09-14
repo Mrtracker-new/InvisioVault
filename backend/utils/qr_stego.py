@@ -270,9 +270,10 @@ def generate_qr_with_stego(
 
             # Convert to plain RGB PNG (no alpha, no palette) for maximum
             # compatibility with scanners and subsequent LSB operations.
-            Image.open(temp_qr_path).convert("RGB").save(
-                output_path, "PNG", optimize=False, compress_level=0
-            )
+            with Image.open(temp_qr_path) as tmp_img:
+                tmp_img.convert("RGB").save(
+                    output_path, "PNG", optimize=False, compress_level=0
+                )
             logger.info("Final QR code saved to: %s", output_path)
         finally:
             if os.path.exists(temp_qr_path):
@@ -313,16 +314,18 @@ def extract_from_qr_stego(
     """
     try:
         logger.info("Extracting from QR code: %s", qr_path)
-        img_array = np.array(Image.open(qr_path).convert("RGB"))
+        with Image.open(qr_path) as raw_img:
+            img_array = np.array(raw_img.convert("RGB"))
         decoded_objects = zxingcpp.read_barcodes(img_array)
 
         if not decoded_objects:
             raise ValueError("No QR code found in the image.")
 
         qr_data = decoded_objects[0].text
-        logger.info("Full QR data (first 100 chars): %s", qr_data[:100])
+        has_ivdata = "#IVDATA:" in qr_data
+        logger.info("QR decoded successfully. Total chars: %d, hidden fragment present: %s", len(qr_data), has_ivdata)
 
-        if "#IVDATA:" not in qr_data:
+        if not has_ivdata:
             logger.info("No IVDATA fragment found — treating as a regular QR code.")
             return qr_data, ""
 
@@ -349,37 +352,29 @@ def extract_from_qr_stego(
 
 
 def calculate_qr_capacity(public_data: str, scale: int = 10) -> int:
-    """Estimate the LSB steganography capacity of a QR code in bytes.
+    """Calculate the estimated secret payload capacity of the QR matrix in bytes.
 
-    This is an informational helper for UI feedback; it does not affect the
-    security of the hidden payload (which lives in the QR data stream).
+    InvisioVault stores hidden secrets inside the QR code data stream using an
+    #IVDATA: fragment. Standard QR Version 40 with high error correction (level 'H')
+    has an absolute maximum binary capacity of 1,273 bytes.
 
     Args:
-        public_data: The public QR data (determines QR version and size).
-        scale:       QR pixel-scale multiplier.
+        public_data: The visible QR data (e.g. URL).
+        scale:       QR pixel-scale multiplier (unused for payload capacity).
 
     Returns:
-        Estimated capacity in bytes; 0 if the QR cannot be generated.
+        Remaining secret text capacity in bytes.
     """
-    try:
-        qr = segno.make(public_data, error="h")
-
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            temp_path = tmp.name
-
-        try:
-            qr.save(temp_path, scale=scale, border=2)
-            img = Image.open(temp_path).convert("RGB")
-            # 3 bits per pixel (1 per RGB channel) divided by 8 → bytes.
-            # Subtract a small header overhead estimate.
-            capacity_bytes = (img.width * img.height * 3) // 8 - 100
-            return max(0, capacity_bytes)
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-    except Exception:
-        return 90_000  # Conservative fallback for typical QR dimensions
+    MAX_QR_BYTES_H = 1273
+    FRAGMENT_PREFIX_LEN = len("#IVDATA:")
+    FLAG_BYTE_LEN = 1
+    public_bytes_len = len(public_data.encode("utf-8")) if public_data else 0
+    available_b64_chars = MAX_QR_BYTES_H - public_bytes_len - FRAGMENT_PREFIX_LEN
+    if available_b64_chars <= 0:
+        return 0
+    # Base64 expansion: 4 chars per 3 bytes
+    raw_payload_bytes = max(0, int(available_b64_chars * 3 / 4) - FLAG_BYTE_LEN)
+    return raw_payload_bytes
 
 
 def decode_qr_only(qr_path: str) -> str:
@@ -395,7 +390,8 @@ def decode_qr_only(qr_path: str) -> str:
         ValueError: If no QR code is found in the image.
     """
     try:
-        img_array = np.array(Image.open(qr_path).convert("RGB"))
+        with Image.open(qr_path) as raw_img:
+            img_array = np.array(raw_img.convert("RGB"))
         decoded_objects = zxingcpp.read_barcodes(img_array)
 
         if not decoded_objects:
@@ -421,19 +417,27 @@ def _embed_logo_in_qr(qr_path: str, logo_path: str) -> None:
         qr_path:   Path to the QR code PNG (overwritten in place).
         logo_path: Path to the logo image (any PIL-supported format).
     """
-    qr_img = Image.open(qr_path).convert("RGBA")
-    logo_img = Image.open(logo_path).convert("RGBA")
+    with Image.open(qr_path) as raw_qr, Image.open(logo_path) as raw_logo:
+        qr_img = raw_qr.convert("RGBA")
+        logo_img = raw_logo.convert("RGBA")
 
-    qr_w, qr_h = qr_img.size
-    max_logo = int(min(qr_w, qr_h) * 0.20)
-    logo_img.thumbnail((max_logo, max_logo), Image.Resampling.LANCZOS)
+    try:
+        qr_w, qr_h = qr_img.size
+        max_logo = int(min(qr_w, qr_h) * 0.20)
+        logo_img.thumbnail((max_logo, max_logo), Image.Resampling.LANCZOS)
 
-    logo_w, logo_h = logo_img.size
-    pos = ((qr_w - logo_w) // 2, (qr_h - logo_h) // 2)
+        logo_w, logo_h = logo_img.size
+        pos = ((qr_w - logo_w) // 2, (qr_h - logo_h) // 2)
 
-    # White backing card ensures contrast regardless of QR background colour.
-    backing = Image.new("RGBA", logo_img.size, "WHITE")
-    backing.paste(logo_img, (0, 0), logo_img)
-
-    qr_img.paste(backing, pos, backing)
-    qr_img.convert("RGB").save(qr_path, "PNG")
+        # White backing card ensures contrast regardless of QR background colour.
+        backing = Image.new("RGBA", logo_img.size, "WHITE")
+        try:
+            backing.paste(logo_img, (0, 0), logo_img)
+            qr_img.paste(backing, pos, backing)
+            with qr_img.convert("RGB") as final_qr:
+                final_qr.save(qr_path, "PNG")
+        finally:
+            backing.close()
+    finally:
+        qr_img.close()
+        logo_img.close()

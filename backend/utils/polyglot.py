@@ -558,6 +558,29 @@ def _check_extract_size(info) -> None:
         )
 
 
+def _safe_read_entry(zf, name: str, pwd: bytes | None = None) -> bytes:
+    """Stream decompression in 64KB chunks, enforcing _MAX_EXTRACT_SIZE during inflation.
+
+    Guards against zip bombs with spoofed or manipulated header sizes where
+    info.file_size claims to be small but inflates to gigabytes.
+    """
+    with zf.open(name, pwd=pwd) as f:
+        chunks = []
+        total = 0
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _MAX_EXTRACT_SIZE:
+                raise ValueError(
+                    f"Extracted file exceeds the maximum allowed size "
+                    f"({_MAX_EXTRACT_SIZE // (1024 * 1024)} MB limit)."
+                )
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
 def _read_zip(zip_path: str, password: str | None) -> Tuple[bytes, str]:
     """Open a ZIP file and return ``(data, filename)`` for the first entry.
 
@@ -575,8 +598,9 @@ def _read_zip(zip_path: str, password: str | None) -> Tuple[bytes, str]:
                 names = zf.namelist()
                 if not names:
                     raise ValueError("ZIP archive is empty")
-                _check_extract_size(zf.getinfo(names[0]))
-                return zf.read(names[0]), names[0]
+                first = names[0]
+                _check_extract_size(zf.getinfo(first))
+                return _safe_read_entry(zf, first), first
         except RuntimeError as exc:
             if "Bad password" in str(exc):
                 raise ValueError("Incorrect password") from exc
@@ -593,7 +617,7 @@ def _read_zip(zip_path: str, password: str | None) -> Tuple[bytes, str]:
             if not password:
                 raise ValueError("This file is password-protected. Please provide the password.")
             try:
-                return zf.read(first, pwd=password.encode()), first
+                return _safe_read_entry(zf, first, pwd=password.encode()), first
             except RuntimeError as exc:
                 raise ValueError("Incorrect password") from exc
-        return zf.read(first), first
+        return _safe_read_entry(zf, first), first
