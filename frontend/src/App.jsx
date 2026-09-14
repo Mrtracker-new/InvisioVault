@@ -191,7 +191,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>&copy; 2025 InvisioVault | Crafted by <a href="https://rolan-rnr.netlify.app/" target="_blank" rel="noopener noreferrer">Rolan</a></p>
+        <p>&copy; {new Date().getFullYear()} InvisioVault | Crafted by <a href="https://rolan-rnr.netlify.app/" target="_blank" rel="noopener noreferrer">Rolan</a></p>
       </footer>
 
       <TutorialModal

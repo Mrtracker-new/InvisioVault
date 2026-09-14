@@ -1,9 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://invisio-vault.vercel.app/</loc>
-    <lastmod>2025-01-05</lastmod>
-    <changefreq>monthly</changefreq>
+    <lastmod>2026-09-14</lastmod>
+    <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://invisio-vault.vercel.app/og-image.png</image:loc>
+      <image:title>InvisioVault - Universal Polyglot &amp; Steganography</image:title>
+      <image:caption>Secure file hiding using steganography and polyglot techniques</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://invisio-vault.vercel.app/InvisioVault.png</image:loc>
+      <image:title>InvisioVault Shield Logo</image:title>
+    </image:image>
+    <image:image>
+      <image:loc>https://invisio-vault.vercel.app/screenshot.png</image:loc>
+      <image:title>InvisioVault Application Interface</image:title>
+      <image:caption>InvisioVault web application interface</image:caption>
+    </image:image>
   </url>
 </urlset>

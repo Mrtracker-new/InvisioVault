@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
 
+# Sitemap and Host directives
 Sitemap: https://invisio-vault.vercel.app/sitemap.xml
+Host: invisio-vault.vercel.app
