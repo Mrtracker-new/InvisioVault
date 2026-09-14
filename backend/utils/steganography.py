@@ -330,7 +330,7 @@ def _v4_seed_from_salt(salt: bytes) -> int:
     return int.from_bytes(digest[:4], "big")
 
 
-def _v4_edge_scores(rgb: np.ndarray) -> np.ndarray:
+def _v4_edge_scores(rgb: np.ndarray, chunk_size: int = 512) -> np.ndarray:
     """Vectorised Sobel edge magnitude (0-255) over LSB-zeroed RGB.
 
     ``rgb`` is an (H, W, 3) uint8 array.  Luminance is computed on the
@@ -338,22 +338,36 @@ def _v4_edge_scores(rgb: np.ndarray) -> np.ndarray:
     replacement — this is what lets extraction recompute the identical
     eligible set after embedding.  Output is a flat (H*W,) uint8 array in
     row-major (y, x) order, matching pixel index = y*W + x.
+
+    Optimized for low peak memory: computes luminance directly and evaluates
+    Sobel in horizontal slices to stay comfortably within constrained environments
+    like Render's 512MB RAM tier without sacrificing bit-exact output.
     """
-    base = (rgb & np.uint8(0xFE)).astype(np.float64)
-    lum = 0.299 * base[:, :, 0] + 0.587 * base[:, :, 1] + 0.114 * base[:, :, 2]
-    # Edge-replicate padding mirrors the clamp used by the scalar reference.
+    H, W, _ = rgb.shape
+    lum = (
+        0.299 * (rgb[:, :, 0] & np.uint8(0xFE)) +
+        0.587 * (rgb[:, :, 1] & np.uint8(0xFE)) +
+        0.114 * (rgb[:, :, 2] & np.uint8(0xFE))
+    )
     padded = np.pad(lum, 1, mode="edge")
-    gx = (
-        -1 * padded[:-2, :-2] + 1 * padded[:-2, 2:]
-        - 2 * padded[1:-1, :-2] + 2 * padded[1:-1, 2:]
-        - 1 * padded[2:, :-2] + 1 * padded[2:, 2:]
-    )
-    gy = (
-        -1 * padded[:-2, :-2] - 2 * padded[:-2, 1:-1] - 1 * padded[:-2, 2:]
-        + 1 * padded[2:, :-2] + 2 * padded[2:, 1:-1] + 1 * padded[2:, 2:]
-    )
-    mag = np.sqrt(gx * gx + gy * gy) * 0.25
-    return np.minimum(255, mag.astype(np.int64)).astype(np.uint8).reshape(-1)
+    scores = np.empty((H, W), dtype=np.uint8)
+
+    for start in range(0, H, chunk_size):
+        end = min(start + chunk_size, H)
+        p_slice = padded[start : end + 2]
+        gx = (
+            -1 * p_slice[:-2, :-2] + 1 * p_slice[:-2, 2:]
+            - 2 * p_slice[1:-1, :-2] + 2 * p_slice[1:-1, 2:]
+            - 1 * p_slice[2:, :-2] + 1 * p_slice[2:, 2:]
+        )
+        gy = (
+            -1 * p_slice[:-2, :-2] - 2 * p_slice[:-2, 1:-1] - 1 * p_slice[:-2, 2:]
+            + 1 * p_slice[2:, :-2] + 2 * p_slice[2:, 1:-1] + 1 * p_slice[2:, 2:]
+        )
+        mag = np.sqrt(gx * gx + gy * gy) * 0.25
+        scores[start:end] = np.minimum(255, mag.astype(np.int64)).astype(np.uint8)
+
+    return scores.reshape(-1)
 
 
 def _v4_eligible_channels(scores: np.ndarray, threshold: int,
@@ -364,13 +378,16 @@ def _v4_eligible_channels(scores: np.ndarray, threshold: int,
     when it lies past the sequential header region AND its pixel's edge score
     meets ``threshold``.  Order is ascending abs_ch, identical on embed and
     extract before the permutation is applied.
+
+    Memory-optimized: uses np.flatnonzero on eligible pixels and expands to
+    sorted channel offsets without allocating full-image index arrays.
     """
-    # Per-pixel eligibility, expanded to 3 channels each.
-    pixel_ok = scores >= threshold                    # (H*W,) bool
-    chan_ok = np.repeat(pixel_ok, 3)                  # (H*W*3,) bool
-    all_ch = np.arange(total_channels, dtype=np.int64)
-    chan_ok &= all_ch >= header_bits                  # exclude header region
-    return all_ch[chan_ok]
+    eligible_pixels = np.flatnonzero(scores >= threshold)
+    if eligible_pixels.size == 0:
+        return np.empty(0, dtype=np.int64)
+    expanded = (eligible_pixels[:, None] * np.int64(3) + np.arange(3, dtype=np.int64)).reshape(-1)
+    start_idx = np.searchsorted(expanded, header_bits)
+    return expanded[start_idx:]
 
 
 def _v4_threshold_from_scores(scores: np.ndarray, header_bits: int,
@@ -379,14 +396,18 @@ def _v4_threshold_from_scores(scores: np.ndarray, header_bits: int,
 
     Uses a score-weighted histogram of per-pixel free-channel counts so the
     search is O(N + 256) rather than O(256*N).
+
+    Memory-optimized: most pixels have exactly 3 free channels. Only pixels
+    overlapping the header region differ, avoiding allocating multiple 64-bit arrays.
     """
     n_pixels = scores.shape[0]
-    starts = np.arange(n_pixels, dtype=np.int64) * 3
-    ends = starts + 3
-    free = (np.minimum(ends, total_channels) - np.maximum(starts, header_bits))
-    free = np.clip(free, 0, 3)                        # channels per pixel past header
-    # channels_at_level[s] = total eligible channels contributed by pixels of score s
-    channels_at_level = np.bincount(scores, weights=free, minlength=256).astype(np.int64)
+    channels_at_level = np.bincount(scores, minlength=256).astype(np.int64) * 3
+    first_full_pixel = min((header_bits + 2) // 3, n_pixels)
+    for p in range(first_full_pixel):
+        actual_free = max(0, min(3 * p + 3, total_channels) - max(3 * p, header_bits))
+        diff = actual_free - 3
+        channels_at_level[scores[p]] += diff
+
     cumulative = 0
     for level in range(255, -1, -1):
         cumulative += int(channels_at_level[level])
@@ -576,7 +597,7 @@ def hide_file_in_image(
         host_img.save(
             output_path, "PNG",
             optimize=False,
-            compress_level=9,
+            compress_level=6,
             pnginfo=pnginfo,
             exif=exif,
         )
