@@ -238,21 +238,25 @@
 
 .password-toggle {
     position: absolute;
-    right: var(--space-3);
+    right: var(--space-2);
     top: 50%;
     transform: translateY(-50%);
     background: transparent;
     border: none;
-    font-size: var(--text-lg);
+    color: var(--text-tertiary);
     cursor: pointer;
     padding: var(--space-2);
     border-radius: var(--radius-sm);
-    opacity: 0.6;
-    transition: opacity var(--duration-fast);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    transition: color var(--duration-fast), background var(--duration-fast);
 }
 
 .password-toggle:hover {
-    opacity: 1;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
 }
 
 /* Buttons */
