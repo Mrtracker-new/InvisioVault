@@ -31,8 +31,11 @@ def create_app(config_name='default'):
     
     # Setup CORS (AFTER config initialization so CORS_ORIGINS is validated)
     cors_origins = list(app.config['CORS_ORIGINS'])
+    import re
+    # Allow Vercel production and preview branch deployments (*.vercel.app)
+    vercel_pattern = re.compile(r"^https://[a-zA-Z0-9-]+\.vercel\.app$")
+    cors_origins.append(vercel_pattern)
     if app.config.get('DEBUG'):
-        import re
         # In development, also allow local network private IP ranges (LAN access via --host)
         lan_pattern = re.compile(
             r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?$"

@@ -376,6 +376,24 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
         self.assertIn("http://localhost:3000", origins)
         self.assertIn("http://127.0.0.1:3000", origins)
 
+    def test_cors_vercel_preview_and_production(self):
+        """Verify Vercel preview and production domains are allowed via CORS."""
+        with unittest.mock.patch.dict(os.environ, {
+            "SECRET_KEY": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "CORS_ORIGINS": "https://invisio-vault.vercel.app"
+        }):
+            prod_app = create_app('production')
+            prod_app.config['TESTING'] = True
+            with prod_app.test_client() as client:
+                # Production domain
+                res_prod = client.get('/api/health', headers={'Origin': 'https://invisio-vault.vercel.app'})
+                self.assertEqual(res_prod.headers.get('Access-Control-Allow-Origin'), 'https://invisio-vault.vercel.app')
+
+                # Preview branch domain
+                preview_origin = 'https://invisio-vault-g6h0nzwmb-mrtracker-news-projects.vercel.app'
+                res_prev = client.get('/api/health', headers={'Origin': preview_origin})
+                self.assertEqual(res_prev.headers.get('Access-Control-Allow-Origin'), preview_origin)
+
     # -------------------------------------------------------------------------
     # 6. Audit Regression Tests (F-01 through F-11)
     # -------------------------------------------------------------------------

@@ -110,7 +110,7 @@ function WakeServerButton() {
         }, 2200)
       }
     } catch (error) {
-      console.error('Server Wake Failed:', error)
+      console.error('Server Wake Failed:', error?.message || error, error?.code || '')
       if (!isMountedRef.current) return
 
       setStatus('error')
