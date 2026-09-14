@@ -27,7 +27,10 @@ from utils.validators import validate_image, validate_hideable_file, MAX_STEGO_I
 from utils.qr_stego import (
     generate_qr_with_stego,
     extract_from_qr_stego,
-    calculate_qr_capacity
+    calculate_qr_capacity,
+    get_qr_capacity_info,
+    QRErrorCode,
+    QRStegoError,
 )
 
 
@@ -614,11 +617,17 @@ def generate_qr_code():
         if password is not None and len(password) < MIN_PASSWORD_LENGTH:
             return jsonify({'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters long'}), 400
         
-        # Validate colors (basic hex color validation)
-        if not (fg_color.startswith('#') and len(fg_color) == 7):
-            fg_color = '#000000'
-        if not (bg_color.startswith('#') and len(bg_color) == 7):
-            bg_color = '#FFFFFF'
+        # Validate and normalize colors (supports 3-char and 6-char hex)
+        def _sanitize_color(c: str, default: str) -> str:
+            c = c.strip()
+            if re.match(r'^#[0-9A-Fa-f]{3}$', c):
+                return '#' + ''.join(ch * 2 for ch in c[1:]).upper()
+            if re.match(r'^#[0-9A-Fa-f]{6}$', c):
+                return c.upper()
+            return default
+
+        fg_color = _sanitize_color(fg_color, '#000000')
+        bg_color = _sanitize_color(bg_color, '#FFFFFF')
         
         # Validate scale
         if scale < 1 or scale > 50:
@@ -640,6 +649,8 @@ def generate_qr_code():
                 # If logo validation fails, continue without logo
                 logo_path = None
 
+        method = request.form.get('method', 'auto').strip()
+
         # Generate QR code with steganography
         output_filename = f"{secrets.token_urlsafe(16)}_qr.png"
         output_path = os.path.join(upload_folder, output_filename)
@@ -652,7 +663,8 @@ def generate_qr_code():
             fg_color=fg_color,
             bg_color=bg_color,
             scale=scale,
-            logo_path=logo_path
+            logo_path=logo_path,
+            method=method,
         )
 
         logger.info(f"Successfully generated QR code: {output_filename}")
@@ -730,38 +742,70 @@ def scan_qr_code():
         
         validate_image(qr_image)
         logger.debug('QR scan: Image validation passed')
-        
+
+        # Burst deduplication cache check (prevents camera frame spam from burning CPU)
+        img_bytes = qr_image.read()
+        qr_image.seek(0)
+        cache_key = hashlib.sha256(img_bytes + (password or "").encode("utf-8")).hexdigest()
+        now = time.time()
+
+        with _qr_cache_lock:
+            # Clean expired entries
+            expired = [k for k, v in qr_detection_cache.items() if now - v[0] > _QR_CACHE_TTL_SECONDS]
+            for k in expired:
+                del qr_detection_cache[k]
+
+            if cache_key in qr_detection_cache:
+                cached_time, cached_payload = qr_detection_cache[cache_key]
+                if now - cached_time < 2.0:
+                    logger.debug("QR scan: Deduplication cache hit for key %s...", cache_key[:8])
+                    status_code = cached_payload.get('_status_code', 200)
+                    resp = {k: v for k, v in cached_payload.items() if k != '_status_code'}
+                    return jsonify(resp), status_code
+
         # Save image temporarily
         upload_folder = current_app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
-        
+
         qr_filename = secure_filename(qr_image.filename)
         qr_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{qr_filename}")
         qr_image.save(qr_path)
         logger.debug(f'QR scan: Saved image to {qr_path}')
-        
+
         # Extract both public and secret data
         logger.info('QR scan: Extracting data from QR code...')
         public_data, secret_data = extract_from_qr_stego(qr_path, password)
 
         logger.info(f'QR scan: Successfully extracted data. Public data length: {len(public_data)}, Secret data present: {bool(secret_data)}')
-        return jsonify({
+        resp_data = {
             'success': True,
             'publicData': public_data,
             'secretData': secret_data,
             'hasPassword': password is not None
-        }), 200
-    
+        }
+
+        with _qr_cache_lock:
+            qr_detection_cache[cache_key] = (now, resp_data)
+            while len(qr_detection_cache) > _QR_CACHE_MAX:
+                qr_detection_cache.popitem(last=False)
+
+        return jsonify(resp_data), 200
+
     except ValueError as e:
         logger.error(f'QR scan: Validation error - {str(e)}')
         safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
-        
-        # Check if password is required
+
+        err_data = {'error': safe_error, '_status_code': 400}
         if 'password' in str(e).lower():
             logger.warning('QR scan: Password required but not provided or incorrect')
-            return jsonify({'error': safe_error, 'passwordRequired': True}), 400
-        
-        return jsonify({'error': safe_error}), 400
+            err_data['passwordRequired'] = True
+
+        if 'cache_key' in locals():
+            with _qr_cache_lock:
+                qr_detection_cache[cache_key] = (time.time(), err_data)
+
+        resp = {k: v for k, v in err_data.items() if k != '_status_code'}
+        return jsonify(resp), 400
     except Exception as e:
         logger.error(f'QR scan: Unexpected error - {str(e)}', exc_info=True)
         safe_error = sanitize_error('An error occurred while scanning the QR code', current_app.config['DEBUG'])
@@ -800,11 +844,16 @@ def qr_capacity():
         except (ValueError, TypeError):
             scale = 15
 
-        capacity = calculate_qr_capacity(public_data, scale)
+        info = get_qr_capacity_info(public_data, scale)
+        capacity = info["safeCapacityBytes"]
 
         return jsonify({
             'totalCapacityBytes': capacity,
-            'totalCapacityFormatted': _format_bytes(capacity)
+            'totalCapacityFormatted': _format_bytes(capacity),
+            'safeCapacityBytes': capacity,
+            'maxSafeVersion': info["maxSafeVersion"],
+            'recommendedErrorCorrection': info["recommendedErrorCorrection"],
+            'recommendedVersion': info["recommendedVersion"]
         }), 200
 
     except Exception as e:
