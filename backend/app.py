@@ -35,7 +35,7 @@ def create_app(config_name='default'):
         import re
         # In development, also allow local network private IP ranges (LAN access via --host)
         lan_pattern = re.compile(
-            r"^http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?$"
+            r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?$"
         )
         cors_origins.append(lan_pattern)
 

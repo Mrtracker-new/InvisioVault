@@ -34,6 +34,7 @@ function Polyglot() {
   const [success, setSuccess] = useState(false)
   const [extractSuccess, setExtractSuccess] = useState('')
   const [downloadId, setDownloadId] = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   const MIN_PASSWORD_LENGTH = 8
 
@@ -175,14 +176,28 @@ function Polyglot() {
     }
   }
 
-  const handleDownload = () => {
-    const link = document.createElement('a')
-    link.href = `${API_URL}/api/polyglot/download/${downloadId}`
-    const ext = downloadId && downloadId.includes('.') ? downloadId.slice(downloadId.lastIndexOf('.')) : ''
-    link.setAttribute('download', `invisiovault_polyglot${ext}`)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
+  const handleDownload = async () => {
+    if (!downloadId || downloading) return
+    setDownloading(true)
+    setError('')
+    try {
+      const response = await axios.get(`${API_URL}/api/polyglot/download/${downloadId}`, {
+        responseType: 'blob'
+      })
+      const ext = downloadId && downloadId.includes('.') ? downloadId.slice(downloadId.lastIndexOf('.')) : ''
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `invisiovault_polyglot${ext}`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(await getApiErrorMessage(err, 'Failed to download polyglot file'))
+    } finally {
+      setDownloading(false)
+    }
   }
 
   const createStages = [
@@ -395,16 +410,21 @@ function Polyglot() {
                 <CheckCircle2 size={48} strokeWidth={1.75} aria-hidden="true" />
               </div>
               <h3>Polyglot Created Successfully!</h3>
-              <p>Your file has been hidden inside the carrier file.</p>
-              <button type="button" onClick={handleDownload} className="download-button">
+              {error && (
+                <div className="error-message" role="alert" style={{ marginBottom: '1rem' }}>
+                  {error}
+                </div>
+              )}
+              <button type="button" onClick={handleDownload} disabled={downloading} className="download-button">
                 <Download size={16} aria-hidden="true" />
-                <span>Download Polyglot File</span>
+                <span>{downloading ? 'Downloading...' : 'Download Polyglot File'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setSuccess(false)
                   setDownloadId('')
+                  setError('')
                 }}
                 className="new-button"
               >

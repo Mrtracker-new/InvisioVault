@@ -3,6 +3,7 @@ import { QrCode, Sparkles, ScanLine, Sliders, Lock, AlertTriangle, ShieldCheck, 
 import axios from 'axios'
 import './QRCode.css'
 import API_URL from '../config/api'
+import { getApiErrorMessage } from '../utils/apiError'
 import { useQRScanner } from '../hooks/useQRScanner'
 import FileDropzone from './FileDropzone'
 import StepProgress from './StepProgress'
@@ -39,6 +40,7 @@ function QRCode() {
     const [error, setError] = useState('')
     const [success, setSuccess] = useState(false)
     const [downloadId, setDownloadId] = useState('')
+    const [downloading, setDownloading] = useState(false)
     const [qrPreview, setQrPreview] = useState(null)
 
     // Scan/Extract state
@@ -200,13 +202,27 @@ function QRCode() {
         }
     }
 
-    const handleDownload = () => {
-        const link = document.createElement('a')
-        link.href = `${API_URL}/api/qr/download/${downloadId}`
-        link.setAttribute('download', 'invisiovault_qrcode.png')
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
+    const handleDownload = async () => {
+        if (!downloadId || downloading) return
+        setDownloading(true)
+        setError('')
+        try {
+            const response = await axios.get(`${API_URL}/api/qr/download/${downloadId}`, {
+                responseType: 'blob'
+            })
+            const url = window.URL.createObjectURL(new Blob([response.data]))
+            const link = document.createElement('a')
+            link.href = url
+            link.setAttribute('download', 'invisiovault_qrcode.png')
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            window.URL.revokeObjectURL(url)
+        } catch (err) {
+            setError(await getApiErrorMessage(err, 'Failed to download QR code'))
+        } finally {
+            setDownloading(false)
+        }
     }
 
     const handleExtract = async (e) => {
@@ -563,9 +579,14 @@ function QRCode() {
                                     </div>
                                 </div>
                             )}
-                            <button type="button" onClick={handleDownload} className="download-button">
+                            {error && (
+                                <div className="error-message" role="alert" style={{ marginBottom: '1rem' }}>
+                                    {error}
+                                </div>
+                            )}
+                            <button type="button" onClick={handleDownload} disabled={downloading} className="download-button">
                                 <Download size={16} aria-hidden="true" />
-                                <span>Download QR Code</span>
+                                <span>{downloading ? 'Downloading...' : 'Download QR Code'}</span>
                             </button>
                             <button type="button" onClick={resetGenerate} className="new-button">
                                 Create Another QR Code

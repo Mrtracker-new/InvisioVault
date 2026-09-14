@@ -28,6 +28,7 @@ function HideFile() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [downloadId, setDownloadId] = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   const MIN_PASSWORD_LENGTH = 8
 
@@ -140,14 +141,27 @@ function HideFile() {
     }
   }
 
-  const handleDownload = () => {
-    if (!downloadId) return
-    const link = document.createElement('a')
-    link.href = `${API_URL}/api/download/${downloadId}`
-    link.setAttribute('download', 'invisiovault_image.png')
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
+  const handleDownload = async () => {
+    if (!downloadId || downloading) return
+    setDownloading(true)
+    setError('')
+    try {
+      const response = await axios.get(`${API_URL}/api/download/${downloadId}`, {
+        responseType: 'blob'
+      })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', 'invisiovault_image.png')
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(await getApiErrorMessage(err, 'Failed to download the generated image'))
+    } finally {
+      setDownloading(false)
+    }
   }
 
   const handleReset = () => {
@@ -348,10 +362,14 @@ function HideFile() {
             <CheckCircle2 size={48} strokeWidth={1.75} aria-hidden="true" />
           </div>
           <h3>File Hidden Successfully!</h3>
-          <p>Your file has been securely hidden in the image.</p>
-          <button type="button" onClick={handleDownload} className="download-button">
+          {error && (
+            <div className="error-message" role="alert" style={{ marginBottom: '1rem' }}>
+              {error}
+            </div>
+          )}
+          <button type="button" onClick={handleDownload} disabled={downloading} className="download-button">
             <Download size={16} aria-hidden="true" />
-            <span>Download Image</span>
+            <span>{downloading ? 'Downloading...' : 'Download Image'}</span>
           </button>
           <button
             type="button"

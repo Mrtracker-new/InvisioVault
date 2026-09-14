@@ -112,7 +112,7 @@ class DevelopmentConfig(Config):
     UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
     
     # Default CORS for local development
-    _cors_origins_raw = 'http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000'
+    _cors_origins_raw = 'http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000,https://localhost:5173,https://127.0.0.1:5173'
     
     # Auto-generate secret key for development if not set
     if not Config.SECRET_KEY:
