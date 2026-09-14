@@ -45,7 +45,10 @@ import numpy as np
 from PIL import Image, ImageOps
 import segno
 import zxingcpp
-from pyzbar import pyzbar
+try:
+    from pyzbar import pyzbar
+except (ImportError, OSError):
+    pyzbar = None
 
 from utils.crypto_utils import (
     FLAG_FERNET,
@@ -751,8 +754,8 @@ def extract_from_qr_stego(
             qr_text = decoded_objects[0].text
             position = decoded_objects[0].position
         else:
-            # Fallback to pyzbar
-            pyz_res = pyzbar.decode(img)
+            # Fallback to pyzbar if available
+            pyz_res = pyzbar.decode(img) if pyzbar is not None else None
             if pyz_res:
                 qr_text = pyz_res[0].data.decode("utf-8", errors="replace")
                 if hasattr(pyz_res[0], "polygon") and len(pyz_res[0].polygon) == 4:
