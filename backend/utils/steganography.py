@@ -94,6 +94,7 @@ import hmac
 import struct
 from cryptography.fernet import Fernet
 import itertools
+import gc
 import numpy as np
 
 from utils.crypto_utils import derive_fernet_key
@@ -339,22 +340,26 @@ def _v4_edge_scores(rgb: np.ndarray, chunk_size: int = 512) -> np.ndarray:
     eligible set after embedding.  Output is a flat (H*W,) uint8 array in
     row-major (y, x) order, matching pixel index = y*W + x.
 
-    Optimized for low peak memory: computes luminance directly and evaluates
-    Sobel in horizontal slices to stay comfortably within constrained environments
-    like Render's 512MB RAM tier without sacrificing bit-exact output.
+    Optimized for ultra-low peak memory: evaluates both luminance and Sobel
+    in horizontal slices, avoiding large float64 image allocations.
     """
     H, W, _ = rgb.shape
-    lum = (
-        0.299 * (rgb[:, :, 0] & np.uint8(0xFE)) +
-        0.587 * (rgb[:, :, 1] & np.uint8(0xFE)) +
-        0.114 * (rgb[:, :, 2] & np.uint8(0xFE))
-    )
-    padded = np.pad(lum, 1, mode="edge")
     scores = np.empty((H, W), dtype=np.uint8)
 
     for start in range(0, H, chunk_size):
         end = min(start + chunk_size, H)
-        p_slice = padded[start : end + 2]
+        r_start = max(0, start - 1)
+        r_end = min(H, end + 1)
+        sub_rgb = rgb[r_start:r_end]
+        sub_lum = (
+            0.299 * (sub_rgb[:, :, 0] & np.uint8(0xFE)) +
+            0.587 * (sub_rgb[:, :, 1] & np.uint8(0xFE)) +
+            0.114 * (sub_rgb[:, :, 2] & np.uint8(0xFE))
+        )
+        pad_top = 1 if start == 0 else 0
+        pad_bottom = 1 if end == H else 0
+        p_slice = np.pad(sub_lum, ((pad_top, pad_bottom), (1, 1)), mode="edge")
+
         gx = (
             -1 * p_slice[:-2, :-2] + 1 * p_slice[:-2, 2:]
             - 2 * p_slice[1:-1, :-2] + 2 * p_slice[1:-1, 2:]
@@ -365,7 +370,7 @@ def _v4_edge_scores(rgb: np.ndarray, chunk_size: int = 512) -> np.ndarray:
             + 1 * p_slice[2:, :-2] + 2 * p_slice[2:, 1:-1] + 1 * p_slice[2:, 2:]
         )
         mag = np.sqrt(gx * gx + gy * gy) * 0.25
-        scores[start:end] = np.minimum(255, mag.astype(np.int64)).astype(np.uint8)
+        scores[start:end] = np.minimum(255, mag.astype(np.int32)).astype(np.uint8)
 
     return scores.reshape(-1)
 
@@ -379,13 +384,13 @@ def _v4_eligible_channels(scores: np.ndarray, threshold: int,
     meets ``threshold``.  Order is ascending abs_ch, identical on embed and
     extract before the permutation is applied.
 
-    Memory-optimized: uses np.flatnonzero on eligible pixels and expands to
-    sorted channel offsets without allocating full-image index arrays.
+    Memory-optimized: uses np.flatnonzero with int32 on eligible pixels and
+    expands to sorted channel offsets without 64-bit array overhead.
     """
-    eligible_pixels = np.flatnonzero(scores >= threshold)
+    eligible_pixels = np.flatnonzero(scores >= threshold).astype(np.int32)
     if eligible_pixels.size == 0:
-        return np.empty(0, dtype=np.int64)
-    expanded = (eligible_pixels[:, None] * np.int64(3) + np.arange(3, dtype=np.int64)).reshape(-1)
+        return np.empty(0, dtype=np.int32)
+    expanded = (eligible_pixels[:, None] * np.int32(3) + np.arange(3, dtype=np.int32)).reshape(-1)
     start_idx = np.searchsorted(expanded, header_bits)
     return expanded[start_idx:]
 
@@ -567,17 +572,23 @@ def hide_file_in_image(
 
     # ── 8. Embed payload into permuted eligible channels (LSB replacement) ────
     eligible = _v4_eligible_channels(scores, threshold, header_total_bits, total_channels)
+    del scores
+    gc.collect()
+
     if eligible.size < payload_bits:
         raise ValueError("Failed to embed all payload bits — image texture insufficient.")
 
     rng = np.random.RandomState(_v4_seed_from_salt(salt))
-    perm = rng.permutation(eligible.size)
-    target_channels = eligible[perm[:payload_bits]]
+    perm_sample = rng.choice(eligible.size, size=payload_bits, replace=False)
+    target_channels = eligible[perm_sample]
+    del eligible, perm_sample
 
     payload_bits_arr = np.unpackbits(
         np.frombuffer(payload_field, dtype=np.uint8)
     )                                                 # MSB-first
     flat[target_channels] = (flat[target_channels] & np.uint8(0xFE)) | payload_bits_arr
+    del target_channels, payload_bits_arr
+    gc.collect()
 
     # ── 9. Reassemble and save with original PNG metadata ─────────────────────
     out_rgb = flat.reshape(height, width, 3)
@@ -700,13 +711,21 @@ def extract_file_from_image(
                 scores = _v4_edge_scores(rgb_arr)     # LSB-invariant, same as embed
                 payload_bits = data_length * 8
                 eligible = _v4_eligible_channels(scores, threshold, header_bits, total_channels)
+                del scores
+                gc.collect()
+
                 if eligible.size < payload_bits:
                     raise ValueError("Adaptive extraction failed – not enough eligible channels.")
                 rng = np.random.RandomState(_v4_seed_from_salt(salt))
-                perm = rng.permutation(eligible.size)
-                target_channels = eligible[perm[:payload_bits]]
+                perm_sample = rng.choice(eligible.size, size=payload_bits, replace=False)
+                target_channels = eligible[perm_sample]
+                del eligible, perm_sample
+
                 bits = (flat[target_channels] & 1).astype(np.uint8)
+                del target_channels, flat, rgb_arr
                 payload_field = np.packbits(bits).tobytes()
+                del bits
+                gc.collect()
             elif is_random_embed and data_length > 0:
                 # ── v3 / legacy random path: pure-Python Feistel walk ─────────
                 px = img.load()  # we need pixel access for edge scores and bit extraction
