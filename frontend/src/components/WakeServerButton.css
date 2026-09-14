@@ -1,452 +1,462 @@
 /* ============================================================================
-   WAKE SERVER BUTTON — Production CSS
-   Fixes: glow-layer always hidden, broken spinner circumference/transform-origin,
-          missing breathing pulse, non-responsive spinner & toast, dead animations.
+   WAKE SERVER BUTTON — Monochrome Frosted Crystal Glass Architecture
+   Matches InvisioVault's Black & White theme while retaining the iconic
+   Tran Mau Tri Tam glass capsule structure:
+   - Thick frosted obsidian-crystal glass capsule (28px blur & saturation boost)
+   - Silver/white internal specular refraction aura (no colored rainbow tint)
+   - Curved top specular lens reflection across top dome
+   - Razor-sharp white top rim highlight & bottom refractive shadow
+   - Elevated floating drop shadow matching black background
+   - Minimal live status beacon dot
+   - Dedicated icon slot with zero collision
    ============================================================================ */
 
 /* --- Container --- */
 .wake-server-container {
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   z-index: 50;
 }
 
-/* --- CSS Custom Properties --- */
-:root {
-  --power-btn-h-mobile: 44px;
-  --power-btn-h-desktop: 48px;
-
-  /* State colors */
-  --color-idle:    rgba(148, 163, 184, 0.85);
-  --color-waking:  rgb(251, 191, 36);
-  --color-online:  rgb(74, 222, 128);
-  --color-error:   rgb(239, 68, 68);
-  --color-cooldown: rgba(148, 163, 184, 0.45);
-
-  /* Glow spread colors */
-  --glow-idle:    rgba(148, 163, 184, 0.18);
-  --glow-waking:  rgba(251, 191, 36, 0.30);
-  --glow-online:  rgba(74,  222, 128, 0.40);
-  --glow-error:   rgba(239,  68,  68, 0.35);
-
-  /* Transitions */
-  --power-ease:   cubic-bezier(0.4, 0, 0.2, 1);
-  --power-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --power-tx: 280ms var(--power-ease);
-}
-
 /* ============================================================================
-   BASE BUTTON
+   MAIN GLASS BUTTON (Pill Capsule — Black & White / Monochrome Theme)
    ============================================================================ */
 
 .power-button {
-  /* Layout */
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 9px;
 
-  /* Mobile: icon-only pill */
-  width: var(--power-btn-h-mobile);
-  height: var(--power-btn-h-mobile);
-  min-width: var(--power-btn-h-mobile);
-  padding: 0;
+  /* Aligned 44px height matching header controls */
+  height: 44px;
+  min-height: 44px;
+  padding: 0 18px;
 
-  /* Visuals */
-  background: rgba(15, 23, 42, 0.65);
-  border: 1.5px solid rgba(148, 163, 184, 0.18);
-  border-radius: 9999px;
-  color: var(--color-idle);
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 
-  /* Typography */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 12.5px;
+  /* Monochrome Frosted Crystal Glass Sheen */
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.03) 45%,
+    rgba(255, 255, 255, 0.08) 100%
+  );
+  color: #ffffff;
+
+  font-family: var(--font-sans);
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 
-  /* Glass effect */
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  /* Heavy Glass Backdrop Blur with Saturation Boost */
+  backdrop-filter: blur(28px) saturate(190%) brightness(1.15);
+  -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(1.15);
 
-  /* Interaction */
+  /* Multi-Depth Glass Optics:
+     - Specular top rim light (sharp white edge)
+     - Inner glass volume diffusion
+     - Bottom edge refraction lip
+     - Physical floating drop shadows */
+  box-shadow:
+    inset 0 1.5px 0 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1.5px 1px 0 rgba(0, 0, 0, 0.4),
+    inset 0 0 16px rgba(255, 255, 255, 0.07),
+    0 14px 34px -6px rgba(0, 0, 0, 0.7),
+    0 4px 12px rgba(0, 0, 0, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-
-  /* Stacking & overflow */
   isolation: isolate;
-  overflow: hidden;         /* clip inner glow to rounded corners */
+  overflow: hidden;
 
   transition:
-    background var(--power-tx),
-    border-color var(--power-tx),
-    color var(--power-tx),
-    box-shadow var(--power-tx),
-    transform 200ms var(--power-ease);
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow 220ms var(--ease-out),
+    transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* ============================================================================
-   INTERACTIVE STATES
+   MONOCHROME SPECULAR REFRACTION AURA (Silver/White Liquid Glass Light)
    ============================================================================ */
 
-/* Hover — desktop pointer only */
+.glass-aura-blob {
+  position: absolute;
+  right: -8px;
+  top: -12px;
+  width: 120px;
+  height: 68px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+  filter: blur(14px);
+  opacity: 0.75;
+  background: radial-gradient(
+    ellipse at 65% 45%,
+    rgba(255, 255, 255, 0.28) 0%,
+    rgba(255, 255, 255, 0.1) 45%,
+    transparent 80%
+  );
+  transition:
+    transform 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.4s ease,
+    filter 0.4s ease;
+}
+
+/* Subtle breathing animation only during waking */
+.glass-aura-blob.aura-waking {
+  animation: aura-monochrome-pulse 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes aura-monochrome-pulse {
+  0% { transform: scale(0.95); opacity: 0.65; }
+  100% { transform: scale(1.15); opacity: 0.95; }
+}
+
+/* ============================================================================
+   CURVED TOP SPECULAR LENS REFLECTION
+   ============================================================================ */
+
+.glass-lens-reflection {
+  position: absolute;
+  top: 1px;
+  left: 6px;
+  right: 6px;
+  height: 48%;
+  border-radius: var(--radius-full) var(--radius-full) 12px 12px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.42) 0%,
+    rgba(255, 255, 255, 0.1) 55%,
+    rgba(255, 255, 255, 0.01) 100%
+  );
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity var(--duration-fast);
+}
+
+/* Diagonal Specular Sheen Sweep */
+.power-button::after {
+  content: '';
+  position: absolute;
+  top: -60%;
+  left: -120%;
+  width: 70%;
+  height: 240%;
+  background: linear-gradient(
+    75deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 80%
+  );
+  transform: rotate(25deg);
+  transition: transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ============================================================================
+   HOVER & ACTIVE INTERACTIONS
+   ============================================================================ */
+
 @media (hover: hover) and (pointer: fine) {
   .power-button:hover:not(:disabled) {
-    background: rgba(20, 30, 55, 0.85);
-    border-color: rgba(148, 163, 184, 0.38);
-    color: rgba(226, 232, 240, 1);
-    transform: translateY(-2px) scale(1.03);
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.38);
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0.05) 45%,
+      rgba(255, 255, 255, 0.12) 100%
+    );
     box-shadow:
-      0 8px 22px rgba(0, 0, 0, 0.45),
-      inset 0 1px 0 rgba(255, 255, 255, 0.07);
+      inset 0 1.5px 0 0 #ffffff,
+      inset 0 -1.5px 1px 0 rgba(0, 0, 0, 0.4),
+      inset 0 0 18px rgba(255, 255, 255, 0.12),
+      0 18px 40px -6px rgba(0, 0, 0, 0.8),
+      0 6px 16px rgba(0, 0, 0, 0.5),
+      0 2px 4px rgba(0, 0, 0, 0.35);
+  }
+
+  .power-button:hover:not(:disabled) .glass-aura-blob {
+    transform: scale(1.22) translateX(-4px);
+    filter: blur(13px);
+    opacity: 0.95;
+  }
+
+  .power-button:hover:not(:disabled)::after {
+    transform: translateX(450%) rotate(25deg);
+  }
+
+  .power-button:hover:not(:disabled) .glass-lens-reflection {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.55) 0%,
+      rgba(255, 255, 255, 0.15) 55%,
+      rgba(255, 255, 255, 0.02) 100%
+    );
   }
 }
 
-/* Press */
+/* Active Press — Glass Compression */
 .power-button:active:not(:disabled) {
-  transform: scale(0.94);
-  transition: transform 90ms ease-out;
+  transform: scale(0.97) translateY(0);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.35),
+    inset 0 2px 6px rgba(0, 0, 0, 0.5),
+    0 6px 16px rgba(0, 0, 0, 0.4);
+  transition: transform 80ms ease-out, box-shadow 80ms ease-out;
 }
 
-/* Focus ring */
+/* Focus Visible */
 .power-button:focus-visible {
   outline: none;
   box-shadow:
-    0 0 0 3px rgba(59, 130, 246, 0.55),
-    0 4px 14px rgba(0, 0, 0, 0.35);
+    var(--focus-ring),
+    inset 0 1.5px 0 0 #ffffff;
 }
 
 /* Disabled */
 .power-button:disabled {
   cursor: not-allowed;
   transform: none !important;
-  opacity: 0.55;
 }
 
-/* ============================================================================
-   STATE — IDLE
-   Subtle breathing glow to show the button is alive.
-   ============================================================================ */
-
-.power-button.idle {
-  border-color: rgba(148, 163, 184, 0.18);
-  color: var(--color-idle);
-}
-
-.power-button.idle .glow-layer {
-  background: radial-gradient(circle at 50% 50%, var(--glow-idle) 0%, transparent 72%);
-  animation: breathing-pulse 3.5s ease-in-out infinite;
-}
-
-@keyframes breathing-pulse {
-  0%, 100% { opacity: 0.30; transform: translate(-50%, -50%) scale(1.0); }
-  50%       { opacity: 0.70; transform: translate(-50%, -50%) scale(1.15); }
-}
-
-/* ============================================================================
-   STATE — WAKING (loading)
-   ============================================================================ */
-
-.power-button.waking {
-  border-color: rgba(251, 191, 36, 0.50);
-  color: var(--color-waking);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.35),
-    0 0 18px rgba(251, 191, 36, 0.12);
-}
-
-.power-button.waking .glow-layer {
-  background: radial-gradient(circle at 50% 50%, var(--glow-waking) 0%, transparent 70%);
-  animation: waking-throb 1.4s ease-in-out infinite;
-}
-
-@keyframes waking-throb {
-  0%, 100% { opacity: 0.45; transform: translate(-50%, -50%) scale(1.0); }
-  50%       { opacity: 0.90; transform: translate(-50%, -50%) scale(1.25); }
-}
-
-/* Icon pulse during waking */
-.power-button.waking .power-icon {
-  animation: icon-pulse 1.4s ease-in-out infinite;
-  will-change: opacity;
-}
-
-@keyframes icon-pulse {
-  0%, 100% { opacity: 1;   }
-  50%       { opacity: 0.5; }
-}
-
-/* ============================================================================
-   STATE — ONLINE (success)
-   ============================================================================ */
-
-.power-button.online {
-  border-color: rgba(74, 222, 128, 0.55);
-  background: rgba(74, 222, 128, 0.08);
-  color: var(--color-online);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.3),
-    0 0 20px rgba(74, 222, 128, 0.15);
-  animation: success-bloom 550ms var(--power-bounce) forwards;
-  will-change: transform;
-}
-
-@keyframes success-bloom {
-  0%   { transform: scale(1);    }
-  55%  { transform: scale(1.12); }
-  100% { transform: scale(1);    }
-}
-
-.power-button.online .glow-layer {
-  background: radial-gradient(circle at 50% 50%, var(--glow-online) 0%, transparent 65%);
-  animation: online-glow 2.5s ease-in-out infinite;
-}
-
-@keyframes online-glow {
-  0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.0);  }
-  50%       { opacity: 1.00; transform: translate(-50%, -50%) scale(1.20); }
-}
-
-/* ============================================================================
-   STATE — ERROR
-   ============================================================================ */
-
-.power-button.error {
-  border-color: rgba(239, 68, 68, 0.55);
-  color: var(--color-error);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.3),
-    0 0 16px rgba(239, 68, 68, 0.15);
-  animation: shake 550ms cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards;
-  will-change: transform;
-}
-
-@keyframes shake {
-  0%,  100% { transform: translateX(0);   }
-  15%, 45%, 75% { transform: translateX(-6px); }
-  30%, 60%, 90% { transform: translateX(6px);  }
-}
-
-.power-button.error .glow-layer {
-  background: radial-gradient(circle at 50% 50%, var(--glow-error) 0%, transparent 70%);
-  opacity: 0.6;
-}
-
-/* ============================================================================
-   STATE — COOLDOWN
-   ============================================================================ */
-
-.power-button.cooldown {
-  border-color: rgba(148, 163, 184, 0.12);
-  color: var(--color-cooldown);
-  background: rgba(15, 23, 42, 0.40);
-}
-
-.power-button.cooldown .glow-layer {
-  opacity: 0;
-}
-
-/* ============================================================================
-   INTERNAL ELEMENTS
-   ============================================================================ */
-
-/* --- Glow Background Layer --- */
-.glow-layer {
+/* Ambient Backlight Glow */
+.power-button .glow-layer {
   position: absolute;
   top: 50%;
   left: 50%;
-  /* Slightly oversized so it bleeds past the border into a soft halo */
-  width: 160%;
-  height: 160%;
+  width: 140%;
+  height: 140%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
   pointer-events: none;
   z-index: 0;
   opacity: 0;
-  will-change: opacity, transform;
-  /* No default transition — each state controls its own animation */
+  transition: opacity var(--duration-normal) var(--ease-out);
 }
 
-/* --- Power Icon --- */
-.power-icon {
-  position: relative;
-  z-index: 2;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  stroke: currentColor;
-  fill: none;
-  transition: opacity var(--power-tx);
-  /* Subtle drop shadow matches current state color via currentColor */
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
+.power-button.online .glow-layer {
+  opacity: 0.25;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.15) 0%, transparent 70%);
 }
 
-/* --- Loading Spinner ---
-   Circle circumference at r=18: 2π×18 ≈ 113.1
-   Arc length ~35% of circle = ~40px       */
-.spinner-ring {
-  position: absolute;
-  /* Center exactly on button */
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  /* Scale with button height, leave 10px margin on each side */
-  width: calc(var(--power-btn-h-mobile) - 12px);
-  height: calc(var(--power-btn-h-mobile) - 12px);
-  z-index: 1;
-  pointer-events: none;
-  overflow: visible;
+.power-button.waking .glow-layer {
+  opacity: 0.3;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.18) 0%, transparent 70%);
 }
 
-.spinner-track {
-  stroke: rgba(251, 191, 36, 0.18);
-  stroke-width: 2.5;
-  fill: none;
+/* Success Pop Keyframe Animation */
+.power-button.success-pop {
+  animation: button-pop 450ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.spinner-arc {
-  stroke: rgb(251, 191, 36);
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  fill: none;
-  /* r=15 → circumference ≈ 94.2; arc ≈ 37% ≈ 35px, gap ≈ 59px */
-  stroke-dasharray: 35 59;
-  stroke-dashoffset: 0;
-  /* Rotate around the SVG's own center */
-  transform-origin: 50% 50%;
-  animation: spinner-rotate 1s linear infinite;
-  filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.65));
-  will-change: transform;
+@keyframes button-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.06); }
+  100% { transform: scale(1); }
 }
 
-@keyframes spinner-rotate {
-  from { transform: rotate(0deg);   }
-  to   { transform: rotate(360deg); }
+/* Error Shake */
+.power-button.error {
+  animation: wake-shake 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
 }
 
-/* --- Success Checkmark --- */
-.success-checkmark {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 22px;
-  height: 22px;
-  stroke: var(--color-online);
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  fill: none;
-  z-index: 3;
-  pointer-events: none;
-  filter: drop-shadow(0 0 5px rgba(74, 222, 128, 0.8));
-  animation: checkmark-pop 500ms var(--power-bounce) forwards;
-  will-change: transform, opacity;
-}
-
-@keyframes checkmark-pop {
-  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
-  60%  { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
-  100% { opacity: 1; transform: translate(-50%, -50%) scale(1);    }
-}
-
-/* Draw the checkmark path */
-.success-checkmark polyline {
-  /* polyline points="20 6 9 17 4 12" → path length ≈ 22px */
-  stroke-dasharray: 22;
-  stroke-dashoffset: 22;
-  animation: checkmark-draw 380ms ease-out 160ms forwards;
-  will-change: stroke-dashoffset;
-}
-
-@keyframes checkmark-draw {
-  to { stroke-dashoffset: 0; }
-}
-
-/* --- Status Label --- */
-.status-label {
-  display: none;
-  position: relative;
-  z-index: 2;
-  font-weight: 600;
-  font-size: 12.5px;
-  letter-spacing: 0.4px;
-  white-space: nowrap;
-  animation: label-slide-in 250ms var(--power-ease) forwards;
-}
-
-@keyframes label-slide-in {
-  from { opacity: 0; transform: translateX(-4px); }
-  to   { opacity: 1; transform: translateX(0);    }
+@keyframes wake-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
 }
 
 /* ============================================================================
-   TOAST NOTIFICATION
+   STATUS BEACON DOT
+   ============================================================================ */
+
+.status-beacon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  z-index: 3;
+}
+
+.beacon-core {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  transition: background var(--duration-fast), box-shadow var(--duration-fast);
+}
+
+.beacon-ping {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Beacon Colors by State */
+.beacon-idle .beacon-core {
+  background: #94a3b8;
+  box-shadow: 0 0 6px rgba(148, 163, 184, 0.7);
+}
+
+.beacon-waking .beacon-core {
+  background: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.85);
+}
+
+.beacon-waking .beacon-ping {
+  background: rgba(251, 191, 36, 0.5);
+  animation: beacon-ripple 1.4s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+
+.beacon-online .beacon-core {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.85);
+}
+
+.beacon-online .beacon-ping {
+  background: rgba(16, 185, 129, 0.4);
+  animation: beacon-ripple 2.8s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+
+.beacon-error .beacon-core {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.85);
+}
+
+.beacon-cooldown .beacon-core {
+  background: #94a3b8;
+  opacity: 0.5;
+}
+
+@keyframes beacon-ripple {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* ============================================================================
+   ICON SLOT
+   ============================================================================ */
+
+.icon-slot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  z-index: 3;
+  color: #ffffff;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+}
+
+.status-icon {
+  stroke: currentColor;
+  display: block;
+}
+
+/* Spinning Loader */
+.icon-spin {
+  animation: icon-rotate 0.85s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes icon-rotate {
+  to { transform: rotate(360deg); }
+}
+
+/* Success Pop Checkmark */
+.icon-success {
+  animation: icon-spring 350ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes icon-spring {
+  0% { transform: scale(0.3); opacity: 0; }
+  70% { transform: scale(1.25); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ============================================================================
+   STATUS LABEL
+   ============================================================================ */
+
+.status-label {
+  position: relative;
+  z-index: 3;
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.7),
+    0 0 12px rgba(255, 255, 255, 0.2);
+  transition: color var(--duration-fast);
+}
+
+/* ============================================================================
+   STATUS TOAST NOTIFICATION (Monochrome Frosted Crystal Glass)
    ============================================================================ */
 
 .status-toast {
   position: absolute;
-  /* Below button with a gap */
-  top: calc(100% + 10px);
+  top: calc(100% + 8px);
   right: 0;
 
-  min-width: 185px;
+  min-width: 170px;
   max-width: 270px;
+  padding: 8px 14px;
 
-  padding: 9px 13px;
-  background: rgba(10, 14, 28, 0.96);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 11px;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    135deg,
+    rgba(15, 23, 42, 0.88) 0%,
+    rgba(20, 29, 47, 0.78) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.18);
+
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.50),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 1px 0 rgba(0, 0, 0, 0.4),
+    0 14px 34px rgba(0, 0, 0, 0.6),
+    0 2px 6px rgba(0, 0, 0, 0.3);
 
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
 
   font-size: 11.5px;
-  font-weight: 500;
-  font-family: 'Inter', -apple-system, system-ui, sans-serif;
-  color: rgba(226, 232, 240, 0.9);
-  line-height: 1.45;
-
+  font-family: var(--font-sans);
+  color: #ffffff;
+  line-height: 1.4;
   pointer-events: none;
-
-  /* Hidden state */
-  opacity: 0;
-  transform: translateY(-6px) scale(0.97);
-  transition:
-    opacity 260ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 100;
 
-  /* Prevent overflow on very small screens */
-  right: 0;
-  left: auto;
-}
-
-/* On mobile ensure toast does not overflow the viewport */
-@media (max-width: 380px) {
-  .status-toast {
-    right: auto;
-    left: 50%;
-    transform: translateX(-50%) translateY(-6px) scale(0.97);
-    min-width: 160px;
-  }
-
-  .status-toast.visible {
-    transform: translateX(-50%) translateY(0) scale(1);
-  }
+  opacity: 0;
+  transform: translateY(-5px) scale(0.97);
+  transition:
+    opacity 220ms ease,
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .status-toast.visible {
@@ -454,142 +464,70 @@
   transform: translateY(0) scale(1);
 }
 
-/* Toast indicator dot */
 .status-toast .toast-dot {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: rgba(148, 163, 184, 0.55);
+  flex-shrink: 0;
+  background: #94a3b8;
 }
 
-/* Loading — animated amber dot */
 .status-toast.loading .toast-dot {
-  background: var(--color-waking);
-  box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
-  animation: dot-breathe 1.2s ease-in-out infinite;
-  will-change: opacity, transform;
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.7);
+  animation: dot-pulse 1s ease-in-out infinite;
 }
 
-@keyframes dot-breathe {
-  0%, 100% { opacity: 0.55; transform: scale(1);    }
-  50%       { opacity: 1;    transform: scale(1.35); }
-}
-
-/* Success */
 .status-toast.success .toast-dot {
-  background: var(--color-online);
-  box-shadow: 0 0 6px rgba(74, 222, 128, 0.55);
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
 }
 
-/* Error */
 .status-toast.error .toast-dot {
-  background: var(--color-error);
-  box-shadow: 0 0 6px rgba(239, 68, 68, 0.55);
+  background: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.7);
 }
 
-/* Info */
-.status-toast.info .toast-dot {
-  background: rgba(148, 163, 184, 0.7);
+@keyframes dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.3); opacity: 1; }
+}
+
+.status-toast .toast-text {
+  font-weight: 500;
 }
 
 /* ============================================================================
-   RESPONSIVE — Tablet & Desktop (768px+): pill with text label
+   RESPONSIVENESS & ACCESSIBILITY
    ============================================================================ */
 
-@media (min-width: 768px) {
+/* Mobile / Small Screens */
+@media (max-width: 480px) {
   .power-button {
-    width: auto;
-    height: var(--power-btn-h-desktop);
-    min-width: var(--power-btn-h-desktop);
-    padding: 0 18px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0 14px;
+    gap: 7px;
+    font-size: 12px;
   }
 
-  .power-icon {
-    width: 18px;
-    height: 18px;
-  }
-
-  .spinner-ring {
-    width: calc(var(--power-btn-h-desktop) - 12px);
-    height: calc(var(--power-btn-h-desktop) - 12px);
-  }
-
-  .status-label {
-    display: block;
-  }
-
-  .success-checkmark {
-    width: 20px;
-    height: 20px;
+  .status-toast {
+    right: 0;
+    max-width: 220px;
   }
 }
 
-/* ============================================================================
-   RESPONSIVE — Large Desktop (1280px+): slightly enlarged
-   ============================================================================ */
-
-@media (min-width: 1280px) {
-  :root {
-    --power-btn-h-desktop: 52px;
-  }
-
-  .power-button {
-    padding: 0 22px;
-    font-size: 13px;
-  }
-
-  .power-icon {
-    width: 20px;
-    height: 20px;
-  }
-}
-
-/* ============================================================================
-   ACCESSIBILITY
-   ============================================================================ */
-
-/* Reduced motion — rely solely on color/opacity, no movement */
+/* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   .power-button,
   .power-button *,
-  .glow-layer,
-  .spinner-arc,
+  .beacon-ping,
   .status-toast,
-  .success-checkmark {
+  .icon-spin,
+  .icon-success,
+  .glass-aura-blob {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 200ms !important;
-  }
-
-  .power-button:active:not(:disabled) {
-    transform: none;
-  }
-}
-
-/* High contrast */
-@media (prefers-contrast: high) {
-  .power-button {
-    border-width: 2px;
-    border-color: currentColor;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-
-  .power-button:focus-visible {
-    outline: 3px solid currentColor;
-    outline-offset: 3px;
-  }
-}
-
-/* Touch devices — ensure minimum tap target */
-@media (hover: none) and (pointer: coarse) {
-  .power-button {
-    min-width: 48px;
-    min-height: 48px;
-  }
-
-  .power-button:active:not(:disabled) {
-    background: rgba(20, 30, 55, 0.9);
+    transition-duration: 100ms !important;
   }
 }
