@@ -1,0 +1,26 @@
+{
+  "v4_clean": {
+    "file": "v4_clean.png",
+    "password": "GoldenPassword999!",
+    "payload_sha256": "d92af0e7080e80d6d35e9eeffd2723dbe766a4fe6d048b0075270be177dd3237",
+    "payload_len": 55,
+    "expected_text": "InvisioVault Golden Fixture Payload - Confidential 2026"
+  },
+  "v4_plain": {
+    "file": "v4_plain.png",
+    "password": null,
+    "payload_sha256": "d92af0e7080e80d6d35e9eeffd2723dbe766a4fe6d048b0075270be177dd3237",
+    "payload_len": 55,
+    "expected_text": "InvisioVault Golden Fixture Payload - Confidential 2026"
+  },
+  "v1_clean": {
+    "file": "v1_clean.png",
+    "password": null,
+    "payload_len": 33
+  },
+  "v2_clean": {
+    "file": "v2_clean.png",
+    "password": "GoldenPassword999!",
+    "payload_len": 33
+  }
+}

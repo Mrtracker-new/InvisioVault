@@ -105,8 +105,30 @@ try:
     _reedsolo = importlib.import_module("reedsolo")
     RSCodec = _reedsolo.RSCodec
     _ECC_AVAILABLE = True
+
+    # Precomputed GF(256) multiplication lookup table (64 KiB)
+    _rs_32 = RSCodec(32)
+    _GF_MUL_TABLE = np.zeros((256, 256), dtype=np.uint8)
+    for _i in range(256):
+        for _j in range(256):
+            _GF_MUL_TABLE[_i, _j] = _reedsolo.gf_mul(_i, _j)
+
+    # 32 generator polynomial coefficients (excluding monic leading 1)
+    _GEN_POLY = np.array(_rs_32.gen[32][1:], dtype=np.uint8)
+    # Generator lookup table for synthetic division: (256, 32) uint8 (8 KiB)
+    _GEN_LUT = _GF_MUL_TABLE[:, _GEN_POLY]
+
+    # Syndrome evaluation power multipliers: (32, 256) uint8 (8 KiB)
+    _SYN_MUL = np.zeros((32, 256), dtype=np.uint8)
+    for _i in range(32):
+        _x = _reedsolo.gf_pow(2, _i)
+        _SYN_MUL[_i] = _GF_MUL_TABLE[:, _x]
 except (ImportError, AttributeError):
     RSCodec = None
+    _rs_32 = None
+    _GF_MUL_TABLE = None
+    _GEN_LUT = None
+    _SYN_MUL = None
     _ECC_AVAILABLE = False
 
 # ── Wire-format constants ──────────────────────────────────────────────────────
@@ -216,18 +238,97 @@ def _safe_decompress(data: bytes, max_size: int = _MAX_DECOMPRESSED_BYTES) -> by
 # ── ECC wrapper (Reed‑Solomon, applied after compression) ─────────────────────
 
 def _ecc_encode(data: bytes) -> bytes:
-    if not _ECC_AVAILABLE or RSCodec is None or len(data) == 0:
+    """Vectorized Reed-Solomon encoding with bit-for-bit equivalence to reedsolo."""
+    if not _ECC_AVAILABLE or _rs_32 is None or len(data) == 0:
         return data
-    rs = RSCodec(32)  # 32 parity bytes per ~223-byte block
-    return bytes(rs.encode(data))
+    ksize = 223
+    n = len(data)
+    m = n // ksize
+    remainder = n % ksize
+
+    parts = []
+    if m > 0:
+        full_data = np.frombuffer(data[:m * ksize], dtype=np.uint8).reshape(m, ksize)
+        buf = np.zeros((m, ksize + 32), dtype=np.uint8)
+        buf[:, :ksize] = full_data
+        for j in range(ksize):
+            coef = buf[:, j]
+            buf[:, j + 1:j + 33] ^= _GEN_LUT[coef]
+        buf[:, :ksize] = full_data
+        parts.append(buf.tobytes())
+
+    if remainder > 0:
+        chunk = data[m * ksize:]
+        k = remainder
+        buf = np.zeros(k + 32, dtype=np.uint8)
+        buf[:k] = np.frombuffer(chunk, dtype=np.uint8)
+        for j in range(k):
+            coef = buf[j]
+            if coef != 0:
+                buf[j + 1:j + 33] ^= _GEN_LUT[coef]
+        buf[:k] = np.frombuffer(chunk, dtype=np.uint8)
+        parts.append(buf.tobytes())
+
+    return b"".join(parts)
 
 
 def _ecc_decode(data: bytes) -> bytes:
-    if not _ECC_AVAILABLE or RSCodec is None or len(data) == 0:
+    """Vectorized syndrome evaluation for fast clean decode, with reedsolo fallback."""
+    if not _ECC_AVAILABLE or _rs_32 is None or len(data) == 0:
         return data
-    rs = RSCodec(32)
+    n = len(data)
+    if n <= 32:
+        try:
+            decoded, *_ = _rs_32.decode(data)
+            return bytes(decoded)
+        except Exception:
+            raise ValueError("ECC decoding failed — too many errors or corrupted data.")
+
+    chunksize = 255
+    m = n // chunksize
+    remainder = n % chunksize
+
+    # Evaluate syndromes in parallel across full chunks
+    all_clean = True
+    if m > 0:
+        full_chunks = np.frombuffer(data[:m * chunksize], dtype=np.uint8).reshape(m, chunksize)
+        for i in range(32):
+            lut = _SYN_MUL[i]
+            y = full_chunks[:, 0]
+            for j in range(1, chunksize):
+                y = lut[y] ^ full_chunks[:, j]
+            if np.any(y != 0):
+                all_clean = False
+                break
+
+    if all_clean and remainder > 0:
+        rem_chunk = np.frombuffer(data[m * chunksize:], dtype=np.uint8)
+        rem_len = len(rem_chunk)
+        if rem_len <= 32:
+            all_clean = False
+        else:
+            for i in range(32):
+                lut = _SYN_MUL[i]
+                y = rem_chunk[0]
+                for j in range(1, rem_len):
+                    y = lut[y] ^ rem_chunk[j]
+                if y != 0:
+                    all_clean = False
+                    break
+
+    if all_clean:
+        # Fast path: 0 syndromes across all chunks; payload is uncorrupted
+        parts = []
+        if m > 0:
+            full_chunks = np.frombuffer(data[:m * chunksize], dtype=np.uint8).reshape(m, chunksize)
+            parts.append(full_chunks[:, :223].tobytes())
+        if remainder > 0:
+            parts.append(data[m * chunksize : n - 32])
+        return b"".join(parts)
+
+    # Fallback path: one or more blocks has non-zero syndromes; repair with reedsolo
     try:
-        decoded, *_ = rs.decode(data)
+        decoded, *_ = _rs_32.decode(data)
         return bytes(decoded)
     except Exception:
         raise ValueError("ECC decoding failed — too many errors or corrupted data.")
@@ -473,12 +574,13 @@ def hide_file_in_image(
             finally:
                 rgba.close()
         else:
-            rgb_img = original_img.convert("RGB")
+            rgb_img = original_img.convert("RGB") if original_img.mode != "RGB" else original_img
             try:
-                rgb_arr = np.asarray(rgb_img, dtype=np.uint8).copy()
+                rgb_arr = np.array(rgb_img, dtype=np.uint8)
                 width, height = rgb_img.width, rgb_img.height
             finally:
-                rgb_img.close()
+                if rgb_img is not original_img:
+                    rgb_img.close()
     total_pixels = width * height
     if total_pixels > (_MAX_PAYLOAD_BYTES * 8 // 3):
         raise ValueError("Host image dimensions exceed the maximum supported size.")
@@ -627,8 +729,15 @@ def extract_file_from_image(
     # return an int (or 4-tuple), crashing pixel[:3] in _iter_lsb_bytes /
     # _compute_edge_scores with a 500.  RGBA→RGB drops alpha without
     # blending, so the embedded RGB channels are read back unchanged.
-    with Image.open(image_path) as raw_img:
-        img = raw_img.convert("RGB") if raw_img.mode != "RGB" else raw_img.copy()
+    raw_img = Image.open(image_path)
+    img = None
+    try:
+        img = raw_img.convert("RGB") if raw_img.mode != "RGB" else raw_img
+        if img is raw_img:
+            img.load()
+    finally:
+        if raw_img is not None and img is not raw_img:
+            raw_img.close()
 
     try:
         width, height = img.width, img.height
@@ -705,8 +814,7 @@ def extract_file_from_image(
 
             # Read payload
             if is_fast and data_length > 0:
-                # ── v4 fast path: vectorised, mirrors the writer exactly ──────
-                rgb_arr = np.asarray(img.convert("RGB"), dtype=np.uint8)
+                rgb_arr = np.asarray(img, dtype=np.uint8)
                 flat = rgb_arr.reshape(-1)
                 scores = _v4_edge_scores(rgb_arr)     # LSB-invariant, same as embed
                 payload_bits = data_length * 8
@@ -839,4 +947,5 @@ def extract_file_from_image(
     except Exception as exc:
         raise ValueError(f"Failed to extract file: {exc}") from exc
     finally:
-        img.close()
+        if img is not None:
+            img.close()
