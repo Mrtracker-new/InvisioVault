@@ -33,6 +33,7 @@ from __future__ import annotations
 import base64
 from enum import Enum
 import hashlib
+import io
 import logging
 import math
 import os
@@ -349,45 +350,36 @@ def _embed_visual_qr(
     fg_rgb = _hex_to_rgb(fg_color)
     bg_rgb = _hex_to_rgb(bg_color)
 
-    # 5. Render image with isolated structural patterns
+    # 5. Render image with isolated structural patterns (vectorized module assignment)
     img_size = (qr_size + 2 * border) * scale
-    img = Image.new("RGB", (img_size, img_size), bg_rgb)
     structural = get_structural_modules(ver)
+    dark_adj = _adjust_luma(fg_rgb, delta)
+    light_adj = _adjust_luma(bg_rgb, -delta)
 
+    arr = np.full((img_size, img_size, 3), bg_rgb, dtype=np.uint8)
     for r in range(qr_size):
         for c in range(qr_size):
             is_dark = (matrix[r][c] == 1)
-            is_structural = (r, c) in structural
-
             x0 = (c + border) * scale
             y0 = (r + border) * scale
 
-            if is_structural:
-                color = fg_rgb if is_dark else bg_rgb
-                for dy in range(scale):
-                    for dx in range(scale):
-                        img.putpixel((x0 + dx, y0 + dy), color)
+            if (r, c) in structural:
+                arr[y0:y0 + scale, x0:x0 + scale] = fg_rgb if is_dark else bg_rgb
             else:
-                bit = mod_bit_map.get((r, c), 0)
-                for dy in range(scale):
-                    for dx in range(scale):
-                        is_inner = (1 <= dx < scale - 1) and (1 <= dy < scale - 1)
-                        if is_dark:
-                            if is_inner and bit == 1:
-                                color = _adjust_luma(fg_rgb, delta)
-                            else:
-                                color = fg_rgb
-                        else:
-                            if is_inner and bit == 1:
-                                color = _adjust_luma(bg_rgb, -delta)
-                            else:
-                                color = bg_rgb
-                        img.putpixel((x0 + dx, y0 + dy), color)
+                base_color = fg_rgb if is_dark else bg_rgb
+                arr[y0:y0 + scale, x0:x0 + scale] = base_color
+                if mod_bit_map.get((r, c), 0) == 1:
+                    inner_color = dark_adj if is_dark else light_adj
+                    arr[y0 + 1:y0 + scale - 1, x0 + 1:x0 + scale - 1] = inner_color
 
-    if logo_path:
-        _embed_logo_image(img, logo_path, border=border, scale=scale)
+    img = Image.fromarray(arr, "RGB")
 
-    img.save(output_path, "PNG")
+    try:
+        if logo_path:
+            _embed_logo_image(img, logo_path, border=border, scale=scale)
+        img.save(output_path, "PNG")
+    finally:
+        img.close()
     logger.info(
         "Visual QR saved to %s (Version %d, Size %dx%d)",
         output_path, ver, img_size, img_size
@@ -561,19 +553,18 @@ def _embed_stream_qr(
             error_code=QRErrorCode.CAPACITY_EXCEEDED,
         )
 
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-        temp_qr_path = tmp.name
+    buf = io.BytesIO()
+    qr.save(buf, kind="png", scale=scale, dark=fg_color, light=bg_color, border=border)
+    buf.seek(0)
 
-    try:
-        qr.save(temp_qr_path, scale=scale, dark=fg_color, light=bg_color, border=border)
-        if logo_path:
-            _embed_logo_in_qr(temp_qr_path, logo_path)
-
-        with Image.open(temp_qr_path) as tmp_img:
-            tmp_img.convert("RGB").save(output_path, "PNG", optimize=False, compress_level=0)
-    finally:
-        if os.path.exists(temp_qr_path):
-            os.remove(temp_qr_path)
+    with Image.open(buf) as tmp_img:
+        rgb_img = tmp_img.convert("RGB")
+        try:
+            if logo_path:
+                _embed_logo_image(rgb_img, logo_path, border=border, scale=scale)
+            rgb_img.save(output_path, "PNG", optimize=False, compress_level=6)
+        finally:
+            rgb_img.close()
 
     return output_path
 
@@ -725,13 +716,17 @@ def extract_from_qr_stego(
                 )
                 return public_data, secret_text
 
-        if not os.path.exists(qr_path):
-            raise QRStegoError(
-                f"QR code file not found: {qr_path}",
-                error_code=QRErrorCode.QR_NOT_DETECTED,
-            )
+        if isinstance(qr_path, (str, os.PathLike)):
+            if not os.path.exists(qr_path):
+                raise QRStegoError(
+                    f"QR code file not found: {qr_path}",
+                    error_code=QRErrorCode.QR_NOT_DETECTED,
+                )
+            img_source = qr_path
+        else:
+            img_source = qr_path
 
-        with Image.open(qr_path) as raw_img:
+        with Image.open(img_source) as raw_img:
             if raw_img.mode in ("RGBA", "LA") or (raw_img.mode == "P" and "transparency" in raw_img.info):
                 rgba_img = raw_img.convert("RGBA")
                 white_bg = Image.new("RGBA", rgba_img.size, (255, 255, 255, 255))
