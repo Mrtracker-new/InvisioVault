@@ -72,9 +72,12 @@ class Config:
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB - for carrier images
     MAX_HIDEABLE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB    # File upload limits - increased to 50MB for phone photos
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50 MB - total request limit
+    SMALL_OBJECT_THRESHOLD_BYTES = int(os.getenv('SMALL_OBJECT_THRESHOLD_BYTES', '1048576'))  # 1 MB
+    MAX_PIXEL_COUNT = int(os.getenv('MAX_PIXEL_COUNT', '25000000'))  # 25 megapixels
     
     # CORS settings - will be set by subclasses
-    _cors_origins_raw = None
+    CORS_ORIGINS_RAW = None
+    _cors_origins_raw = None  # backward compatibility alias
     CORS_ORIGINS = []  # Will be set after validation
     
     # Logging
@@ -90,7 +93,7 @@ class Config:
         
         # Validate and set CORS origins
         # Read from environment variable OR use class default
-        cors_raw = os.getenv('CORS_ORIGINS') or app.config.get('_cors_origins_raw')
+        cors_raw = os.getenv('CORS_ORIGINS') or app.config.get('CORS_ORIGINS_RAW') or app.config.get('_cors_origins_raw')
         
         if not cors_raw:
             raise ValueError("CORS_ORIGINS must be set! Either via environment variable or config class.")
@@ -112,7 +115,8 @@ class DevelopmentConfig(Config):
     UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
     
     # Default CORS for local development
-    _cors_origins_raw = 'http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000,https://localhost:5173,https://127.0.0.1:5173'
+    CORS_ORIGINS_RAW = 'http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000,https://localhost:5173,https://127.0.0.1:5173'
+    _cors_origins_raw = CORS_ORIGINS_RAW
     
     # Auto-generate secret key for development if not set
     if not Config.SECRET_KEY:
@@ -130,7 +134,8 @@ class ProductionConfig(Config):
     # Production should use your actual domains
     # Example: Set CORS_ORIGINS env var to: https://invisio-vault.vercel.app,https://yourdomain.com
     # Fallback to Vercel deployment if not set
-    _cors_origins_raw = 'https://invisio-vault.vercel.app'
+    CORS_ORIGINS_RAW = 'https://invisio-vault.vercel.app'
+    _cors_origins_raw = CORS_ORIGINS_RAW
 
 
 config = {

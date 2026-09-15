@@ -3,10 +3,12 @@ from flask import Flask, request
 from flask_cors import CORS
 import logging
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables explicitly from backend/.env
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_env_path)
 
 from config.settings import config
 from api.routes import api

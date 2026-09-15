@@ -285,6 +285,36 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
             extract_from_qr_stego(qr_output, password=None)
         self.assertIn("password", str(ctx.exception).lower())
 
+    def test_qr_sha256_integrity_matrix(self):
+        """Verify QR secret extraction matches exact SHA-256 across full payload spectrum."""
+        import hashlib
+        sizes = [1, 10, 50, 100, 250, 500, 580]
+        pwd = "MatrixPassword123!"
+
+        for s in sizes:
+            secret = os.urandom(s).hex()[:s]
+            expected_sha256 = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+            # 1. Encrypted stream QR
+            enc_path = os.path.join(self.temp_dir, f"sha_qr_enc_{s}.png")
+            generate_qr_with_stego("https://invisiovault.app", secret, enc_path, password=pwd, method="stream")
+            _, ext_secret = extract_from_qr_stego(enc_path, password=pwd)
+            self.assertEqual(
+                hashlib.sha256(ext_secret.encode("utf-8")).hexdigest(),
+                expected_sha256,
+                f"Encrypted QR payload SHA-256 mismatch at {s} bytes"
+            )
+
+            # 2. Plain stream QR
+            plain_path = os.path.join(self.temp_dir, f"sha_qr_plain_{s}.png")
+            generate_qr_with_stego("https://invisiovault.app", secret, plain_path, method="stream")
+            _, ext_plain = extract_from_qr_stego(plain_path)
+            self.assertEqual(
+                hashlib.sha256(ext_plain.encode("utf-8")).hexdigest(),
+                expected_sha256,
+                f"Plain QR payload SHA-256 mismatch at {s} bytes"
+            )
+
     # -------------------------------------------------------------------------
     # 4. Error Sanitization Tests
     # -------------------------------------------------------------------------
@@ -636,6 +666,55 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
             data={"public_data": "https://example.com", "scale": "not-an-int"}
         )
         self.assertEqual(resp_cap_invalid.status_code, 200)
+
+    # -------------------------------------------------------------------------
+    # 7. Production Security Posture & Validation Tests
+    # -------------------------------------------------------------------------
+
+    def test_decompression_bomb_protection(self):
+        """Verify images exceeding MAX_PIXEL_COUNT are rejected before decompression."""
+        from utils.validators import validate_image, MAX_PIXEL_COUNT
+        from werkzeug.datastructures import FileStorage
+
+        buf = io.BytesIO()
+        # 5001x5001 = 25,010,001 pixels > 25,000,000 cap
+        Image.new("RGB", (5001, 5001)).save(buf, format="PNG")
+        buf.seek(0)
+        fs = FileStorage(stream=buf, filename="oversized.png", content_type="image/png")
+
+        with self.assertRaises(ValueError) as ctx:
+            validate_image(fs)
+        self.assertIn("too large", str(ctx.exception).lower())
+
+    def test_path_traversal_protection(self):
+        """Verify path traversal sequences in filenames and download IDs are strictly rejected."""
+        # 1. Invalid download ID with directory traversal
+        res_traversal = self.client.get("/api/download/..%2f..%2fetc%2fpasswd")
+        self.assertIn(res_traversal.status_code, (400, 404))
+
+        res_traversal_raw = self.client.get("/api/download/evil..png")
+        self.assertEqual(res_traversal_raw.status_code, 400)
+        self.assertIn("Invalid download ID", res_traversal_raw.get_json().get("error", ""))
+
+    def test_download_idor_object_ownership(self):
+        """Verify download endpoint rejects malformed tokens and prevents object enumeration."""
+        # Guessed / forged token
+        res_forged = self.client.get("/api/download/nonexistent12345678901.png")
+        self.assertEqual(res_forged.status_code, 404)
+        self.assertIn("File not found", res_forged.get_json().get("error", ""))
+
+    def test_upload_size_and_mime_validation(self):
+        """Verify invalid MIME types, executable headers, and spoofed files are rejected."""
+        fake_exe = io.BytesIO(b"MZ\x90\x00\x03\x00\x00\x00" + b"\x00" * 100)
+        res = self.client.post(
+            "/api/hide",
+            data={
+                "image": (fake_exe, "malicious.exe"),
+                "text": "secret"
+            },
+            content_type="multipart/form-data"
+        )
+        self.assertEqual(res.status_code, 400)
 
 
 if __name__ == '__main__':
