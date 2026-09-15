@@ -51,6 +51,12 @@ _QR_CACHE_TTL_SECONDS = 5
 
 _SAFE_MIME_RE = re.compile(r'^[a-zA-Z0-9!#$&^_.+-]+/[a-zA-Z0-9!#$&^_.+-]+$')
 
+# Concurrency control for Render 512 MB memory envelope.
+# Deterministically limits concurrent heavy operations (hide, extract, polyglot)
+# to 1 across the single Gunicorn worker process, preventing OOM spikes.
+_HEAVY_OP_TIMEOUT_SECONDS: float = 30.0
+_heavy_operation_semaphore = threading.BoundedSemaphore(1)
+
 
 # Security: Sanitize error messages for production
 SAFE_ERROR_MESSAGES = {
@@ -255,43 +261,54 @@ def hide_file():
         if password is not None and len(password) < MIN_PASSWORD_LENGTH:
             return jsonify({'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters long'}), 400
 
-        # Validate image
+        # Pre-validation: format, magic, dimensions, and size checks before acquiring lock
         validate_image(image)
-
-        # Save files temporarily
-        upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        
-        image_filename = secure_filename(image.filename)
-        image_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{image_filename}")
-        image.save(image_path)
-        
-        # Handle text or file
-        if text_to_hide:
-            # Create temporary text file
-            file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_hidden_text.txt")
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(text_to_hide)
-            clean_original_filename = "hidden_text.txt"
-        else:
-            # Validate and save uploaded file
+        if not text_to_hide:
             validate_hideable_file(file_to_hide)
-            file_filename = _safe_upload_name(file_to_hide.filename)
-            file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{file_filename}")
-            file_to_hide.save(file_path)
-            clean_original_filename = file_filename
 
-        # Hide file in image
-        output_filename = f"{secrets.token_urlsafe(16)}.png"
-        output_path = os.path.join(upload_folder, output_filename)
-        hide_file_in_image(image_path, file_path, output_path, password, original_filename=clean_original_filename)
+        # Concurrency protection: acquire bounded semaphore for heavy steganography encode
+        acquired = _heavy_operation_semaphore.acquire(timeout=_HEAVY_OP_TIMEOUT_SECONDS)
+        if not acquired:
+            logger.warning("Heavy operation timed out waiting for semaphore on /hide")
+            return jsonify({
+                'error': 'The server is currently busy processing another heavy task. Please try again shortly.'
+            }), 503, {'Retry-After': '5'}
 
-        logger.info(f"Successfully hid file in image: {output_filename}")
-        return jsonify({
-            'success': True,
-            'message': 'File hidden successfully',
-            'download_id': output_filename
-        }), 200
+        try:
+            # Save files temporarily
+            upload_folder = current_app.config['UPLOAD_FOLDER']
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            image_filename = secure_filename(image.filename)
+            image_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{image_filename}")
+            image.save(image_path)
+            
+            # Handle text or file
+            if text_to_hide:
+                # Create temporary text file
+                file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_hidden_text.txt")
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(text_to_hide)
+                clean_original_filename = "hidden_text.txt"
+            else:
+                file_filename = _safe_upload_name(file_to_hide.filename)
+                file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{file_filename}")
+                file_to_hide.save(file_path)
+                clean_original_filename = file_filename
+
+            # Hide file in image
+            output_filename = f"{secrets.token_urlsafe(16)}.png"
+            output_path = os.path.join(upload_folder, output_filename)
+            hide_file_in_image(image_path, file_path, output_path, password, original_filename=clean_original_filename)
+
+            logger.info(f"Successfully hid file in image: {output_filename}")
+            return jsonify({
+                'success': True,
+                'message': 'File hidden successfully',
+                'download_id': output_filename
+            }), 200
+        finally:
+            _heavy_operation_semaphore.release()
 
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
@@ -357,37 +374,67 @@ def extract_file():
         if not image:
             return jsonify({'error': 'Image file is required'}), 400
 
-        # Stego images are app-generated lossless PNGs and routinely exceed
-        # the 10 MB carrier-upload cap (a 2 MB JPEG carrier yields a 12+ MB
-        # stego PNG), so extraction uses the larger MAX_STEGO_IMAGE_SIZE cap.
+        # Pre-validation: magic bytes, dimensions, and size checks before acquiring lock
         validate_image(image, max_size=MAX_STEGO_IMAGE_SIZE)
 
-        # Save image temporarily
-        upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        
-        image_filename = secure_filename(image.filename)
-        image_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{image_filename}")
-        image.save(image_path)
+        # Concurrency protection: acquire bounded semaphore for heavy extraction
+        acquired = _heavy_operation_semaphore.acquire(timeout=_HEAVY_OP_TIMEOUT_SECONDS)
+        if not acquired:
+            logger.warning("Heavy operation timed out waiting for semaphore on /extract")
+            return jsonify({
+                'error': 'The server is currently busy processing another heavy task. Please try again shortly.'
+            }), 503, {'Retry-After': '5'}
 
-        # Extract file
-        file_data, original_filename, mime_type = extract_file_from_image(image_path, password)
+        try:
+            # Save image temporarily
+            upload_folder = current_app.config['UPLOAD_FOLDER']
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            image_filename = secure_filename(image.filename)
+            image_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{image_filename}")
+            image.save(image_path)
 
-        # Send extracted file
-        output = BytesIO(file_data)
-        output.seek(0)
+            # Extract file
+            file_data, original_filename, mime_type = extract_file_from_image(image_path, password)
 
-        # Sanitize filename from untrusted stego metadata to prevent
-        # Content-Disposition header injection / path traversal (P0-03)
-        safe_filename = _safe_download_name(original_filename)
-        safe_mime = mime_type if (mime_type and _SAFE_MIME_RE.match(mime_type)) else "application/octet-stream"
-        logger.info(f"Successfully extracted file: {safe_filename} (mimetype: {safe_mime})")
-        return send_file(
-            output,
-            mimetype=safe_mime,
-            as_attachment=True,
-            download_name=safe_filename
-        )
+            # Sanitize filename from untrusted stego metadata to prevent
+            # Content-Disposition header injection / path traversal (P0-03)
+            safe_filename = _safe_download_name(original_filename)
+            safe_mime = mime_type if (mime_type and _SAFE_MIME_RE.match(mime_type)) else "application/octet-stream"
+            logger.info(f"Successfully extracted file: {safe_filename} (mimetype: {safe_mime})")
+
+            # Configurable size-tiered response streaming:
+            # Small objects (< threshold): in-memory BytesIO (eliminates disk I/O)
+            # Large objects (>= threshold): file-backed streaming with response.call_on_close cleanup
+            threshold = current_app.config.get('SMALL_OBJECT_THRESHOLD_BYTES', 1048576)
+            if len(file_data) < threshold:
+                output = BytesIO(file_data)
+                output.seek(0)
+                del file_data
+                return send_file(
+                    output,
+                    mimetype=safe_mime,
+                    as_attachment=True,
+                    download_name=safe_filename
+                )
+            else:
+                out_tmp_filename = f"ext_{secrets.token_hex(8)}_{safe_filename}"
+                out_tmp_path = os.path.join(upload_folder, out_tmp_filename)
+                with open(out_tmp_path, "wb") as f:
+                    f.write(file_data)
+                del file_data
+
+                response = send_file(
+                    out_tmp_path,
+                    mimetype=safe_mime,
+                    as_attachment=True,
+                    download_name=safe_filename
+                )
+                response.direct_passthrough = False
+                response.call_on_close(lambda: _remove_quietly(out_tmp_path))
+                return response
+        finally:
+            _heavy_operation_semaphore.release()
 
     except ValueError as e:
         logger.error(f"Extraction error: {str(e)}")
@@ -447,34 +494,45 @@ def create_polyglot_file():
         if password is not None and len(password) < MIN_PASSWORD_LENGTH:
             return jsonify({'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters long'}), 400
 
-        # Save files temporarily
-        upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        
-        carrier_filename = _safe_upload_name(carrier_file.filename)
-        file_filename = _safe_upload_name(file_to_hide.filename)
-        
-        carrier_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{carrier_filename}")
-        file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{file_filename}")
-        
-        carrier_file.save(carrier_path)
-        file_to_hide.save(file_path)
+        # Concurrency protection: acquire bounded semaphore for heavy polyglot creation
+        acquired = _heavy_operation_semaphore.acquire(timeout=_HEAVY_OP_TIMEOUT_SECONDS)
+        if not acquired:
+            logger.warning("Heavy operation timed out waiting for semaphore on /polyglot/create")
+            return jsonify({
+                'error': 'The server is currently busy processing another heavy task. Please try again shortly.'
+            }), 503, {'Retry-After': '5'}
 
-        # Create polyglot file with same extension as carrier (fallback to .bin if missing or invalid)
-        carrier_ext = os.path.splitext(carrier_filename)[1]
-        if not carrier_ext or not carrier_ext.lstrip('.').isalnum():
-            carrier_ext = '.bin'
-        output_filename = f"{secrets.token_urlsafe(16)}{carrier_ext}"
-        output_path = os.path.join(upload_folder, output_filename)
-        
-        create_polyglot(carrier_path, file_path, output_path, password, original_filename=file_filename)
+        try:
+            # Save files temporarily
+            upload_folder = current_app.config['UPLOAD_FOLDER']
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            carrier_filename = _safe_upload_name(carrier_file.filename)
+            file_filename = _safe_upload_name(file_to_hide.filename)
+            
+            carrier_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{carrier_filename}")
+            file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{file_filename}")
+            
+            carrier_file.save(carrier_path)
+            file_to_hide.save(file_path)
 
-        logger.info(f"Successfully created polyglot file: {output_filename}")
-        return jsonify({
-            'success': True,
-            'message': 'Polyglot file created successfully',
-            'download_id': output_filename
-        }), 200
+            # Create polyglot file with same extension as carrier (fallback to .bin if missing or invalid)
+            carrier_ext = os.path.splitext(carrier_filename)[1]
+            if not carrier_ext or not carrier_ext.lstrip('.').isalnum():
+                carrier_ext = '.bin'
+            output_filename = f"{secrets.token_urlsafe(16)}{carrier_ext}"
+            output_path = os.path.join(upload_folder, output_filename)
+            
+            create_polyglot(carrier_path, file_path, output_path, password, original_filename=file_filename)
+
+            logger.info(f"Successfully created polyglot file: {output_filename}")
+            return jsonify({
+                'success': True,
+                'message': 'Polyglot file created successfully',
+                'download_id': output_filename
+            }), 200
+        finally:
+            _heavy_operation_semaphore.release()
 
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
@@ -545,30 +603,61 @@ def extract_from_polyglot_file():
         if poly_size > current_app.config['MAX_CONTENT_LENGTH']:
             return jsonify({'error': 'Polyglot file exceeds maximum allowed size'}), 400
 
-        # Save file temporarily
-        upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        
-        polyglot_filename = secure_filename(polyglot_file.filename)
-        polyglot_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{polyglot_filename}")
-        polyglot_file.save(polyglot_path)
+        # Concurrency protection: acquire bounded semaphore for heavy polyglot extraction
+        acquired = _heavy_operation_semaphore.acquire(timeout=_HEAVY_OP_TIMEOUT_SECONDS)
+        if not acquired:
+            logger.warning("Heavy operation timed out waiting for semaphore on /polyglot/extract")
+            return jsonify({
+                'error': 'The server is currently busy processing another heavy task. Please try again shortly.'
+            }), 503, {'Retry-After': '5'}
 
-        # Extract file
-        file_data, original_filename = extract_from_polyglot(polyglot_path, password)
+        try:
+            # Save file temporarily
+            upload_folder = current_app.config['UPLOAD_FOLDER']
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            polyglot_filename = secure_filename(polyglot_file.filename)
+            polyglot_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{polyglot_filename}")
+            polyglot_file.save(polyglot_path)
 
-        # Send extracted file
-        output = BytesIO(file_data)
-        output.seek(0)
+            # Extract file
+            file_data, original_filename = extract_from_polyglot(polyglot_path, password)
 
-        # Sanitize filename from untrusted ZIP/polyglot metadata to prevent
-        # Content-Disposition header injection / path traversal (P0-03)
-        safe_filename = _safe_download_name(original_filename)
-        logger.info(f"Successfully extracted from polyglot: {safe_filename}")
-        return send_file(
-            output,
-            as_attachment=True,
-            download_name=safe_filename
-        )
+            # Sanitize filename from untrusted ZIP/polyglot metadata to prevent
+            # Content-Disposition header injection / path traversal (P0-03)
+            safe_filename = _safe_download_name(original_filename)
+            logger.info(f"Successfully extracted from polyglot: {safe_filename}")
+
+            # Configurable size-tiered response streaming:
+            # Small objects (< threshold): in-memory BytesIO
+            # Large objects (>= threshold): file-backed streaming with response.call_on_close cleanup
+            threshold = current_app.config.get('SMALL_OBJECT_THRESHOLD_BYTES', 1048576)
+            if len(file_data) < threshold:
+                output = BytesIO(file_data)
+                output.seek(0)
+                del file_data
+                return send_file(
+                    output,
+                    as_attachment=True,
+                    download_name=safe_filename
+                )
+            else:
+                out_tmp_filename = f"ext_poly_{secrets.token_hex(8)}_{safe_filename}"
+                out_tmp_path = os.path.join(upload_folder, out_tmp_filename)
+                with open(out_tmp_path, "wb") as f:
+                    f.write(file_data)
+                del file_data
+
+                response = send_file(
+                    out_tmp_path,
+                    as_attachment=True,
+                    download_name=safe_filename
+                )
+                response.direct_passthrough = False
+                response.call_on_close(lambda: _remove_quietly(out_tmp_path))
+                return response
+        finally:
+            _heavy_operation_semaphore.release()
 
     except ValueError as e:
         logger.error(f"Polyglot extraction error: {str(e)}")

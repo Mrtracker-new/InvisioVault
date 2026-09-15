@@ -20,13 +20,15 @@ import logging
 from PIL import Image
 from werkzeug.datastructures import FileStorage
 
+import os
+
 logger = logging.getLogger(__name__)
 
 # ── Global Pillow safety cap ─────────────────────────────────────────────────
 # Setting this converts Pillow's DecompressionBombWarning into a hard
 # DecompressionBombError for *any* image exceeding the limit, regardless
-# of which code path opens it.
-MAX_PIXEL_COUNT = 100_000_000  # 100 megapixels
+# of which code path opens it. Configured for Render 512 MB memory safety.
+MAX_PIXEL_COUNT = int(os.getenv('MAX_PIXEL_COUNT', '25000000'))  # 25 megapixels
 Image.MAX_IMAGE_PIXELS = MAX_PIXEL_COUNT
 
 # ── File size limits (bytes) ─────────────────────────────────────────────────
@@ -176,13 +178,23 @@ def validate_image(file: FileStorage, max_size: int = MAX_IMAGE_SIZE) -> None:
             "Allowed formats: PNG, JPEG, BMP."
         )
 
-    # ── 3. Pillow structural validation ──────────────────────────────────
+    # ── 3. Pillow structural validation & pixel-count cap ────────────────
     # Image.open() only reads headers; .verify() walks chunk tables
     # without fully decompressing pixel data — fast and safe.
     try:
         file.stream.seek(0)
         with Image.open(file.stream) as img:
+            width, height = img.size
+            pixel_count = width * height
+            if pixel_count > MAX_PIXEL_COUNT:
+                raise ValueError(
+                    f"Image is too large ({width}×{height} = "
+                    f"{pixel_count:,} pixels). Maximum is "
+                    f"{MAX_PIXEL_COUNT:,} pixels."
+                )
             img.verify()  # raises if the structure is broken / adversarial
+    except ValueError:
+        raise  # re-raise our own pixel-count ValueError
     except Image.DecompressionBombError:
         raise ValueError(
             f"Image dimensions exceed the maximum supported size "
@@ -202,28 +214,6 @@ def validate_image(file: FileStorage, max_size: int = MAX_IMAGE_SIZE) -> None:
         raise ValueError(
             "The file could not be validated as a safe image."
         )
-    finally:
-        file.stream.seek(0)
-
-    # ── 4. Pixel-count cap ───────────────────────────────────────────────
-    # Image.verify() closes the file handle in some Pillow versions, so
-    # we re-open to read dimensions.  This is a cheap header-only parse.
-    try:
-        file.stream.seek(0)
-        with Image.open(file.stream) as img:
-            width, height = img.size
-            pixel_count = width * height
-            if pixel_count > MAX_PIXEL_COUNT:
-                raise ValueError(
-                    f"Image is too large ({width}×{height} = "
-                    f"{pixel_count:,} pixels). Maximum is "
-                    f"{MAX_PIXEL_COUNT:,} pixels."
-                )
-    except ValueError:
-        raise  # re-raise our own ValueError
-    except Exception as exc:
-        logger.warning("Could not read image dimensions: %s", exc)
-        raise ValueError("Could not verify image dimensions.")
     finally:
         file.stream.seek(0)
 
