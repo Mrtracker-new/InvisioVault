@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import math
 import struct
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 from PIL import Image
@@ -100,6 +100,14 @@ def get_structural_modules(version: int) -> Set[Tuple[int, int]]:
     dark_row = 4 * version + 9
     structural.add((dark_row, 8))
 
+    # 6. Center reservation (protects center area up to 15% width from data modulation,
+    # ensuring that centered logos do not overwrite or corrupt steganographic bits)
+    center = size // 2
+    logo_mod_radius = int(math.ceil((size + 8) * 0.15 / 2)) + 1
+    for r in range(max(0, center - logo_mod_radius), min(size, center + logo_mod_radius + 1)):
+        for c in range(max(0, center - logo_mod_radius), min(size, center + logo_mod_radius + 1)):
+            structural.add((r, c))
+
     return structural
 
 
@@ -144,8 +152,18 @@ def deterministic_permute(items: list, seed: bytes) -> list:
     return result
 
 
-def _verify_finder_pattern(rect: Image.Image, r0: int, c0: int, scale: int = 10) -> bool:
-    """Verify standard 7x7 concentric finder pattern at (r0, c0) using relative contrast."""
+def verify_finder_pattern(
+    rect: Image.Image,
+    r0: int,
+    c0: int,
+    scale: int = 10,
+    min_contrast: float = 10.0,
+) -> Tuple[bool, float]:
+    """Verify standard 7x7 concentric finder pattern at (r0, c0) using relative contrast.
+
+    Returns:
+        (is_valid, threshold) where threshold is the estimated dark/light midpoint.
+    """
     # Center 3x3 must be dark: (r0+2..r0+4, c0+2..c0+4)
     center_samples: List[int] = []
     for dr in range(2, 5):
@@ -169,11 +187,56 @@ def _verify_finder_pattern(rect: Image.Image, r0: int, c0: int, scale: int = 10)
     avg_center = sum(center_samples) / len(center_samples)
     avg_ring = sum(ring_samples) / len(ring_samples)
 
-    # Ring must be substantially lighter than dark center (contrast difference >= 20)
-    if avg_ring - avg_center < 20:
-        return False
+    # Ring must be lighter than dark center (relative contrast >= min_contrast)
+    if avg_ring - avg_center < min_contrast:
+        fallback_th = (avg_center + avg_ring) / 2.0 if avg_ring > avg_center else 128.0
+        return False, fallback_th
 
-    return True
+    return True, (avg_center + avg_ring) / 2.0
+
+
+_verify_finder_pattern = verify_finder_pattern
+
+
+def find_perspective_coeffs(
+    src_pts: Sequence[Tuple[float, float]],
+    dst_pts: Sequence[Tuple[float, float]],
+) -> np.ndarray:
+    """Compute 8-element perspective transform coefficients for Pillow.
+
+    Maps destination coordinates (xd, yd) to source image coordinates (xs, ys):
+        xs = (a * xd + b * yd + c) / (g * xd + h * yd + 1)
+        ys = (d * xd + e * yd + f) / (g * xd + h * yd + 1)
+
+    Args:
+        src_pts: 4 source points [TL, BL, BR, TR] in the input image.
+        dst_pts: 4 destination points [TL, BL, BR, TR] in canonical rectangle.
+
+    Returns:
+        8-element 1D numpy array (a, b, c, d, e, f, g, h).
+    """
+    matrix = []
+    for (xd, yd), (xs, ys) in zip(dst_pts, src_pts):
+        matrix.append([xd, yd, 1.0, 0.0, 0.0, 0.0, -xs * xd, -xs * yd])
+        matrix.append([0.0, 0.0, 0.0, xd, yd, 1.0, -ys * xd, -ys * yd])
+    A = np.asarray(matrix, dtype=float)
+    B = np.asarray(src_pts, dtype=float).reshape(8)
+    coeffs, _, _, _ = np.linalg.lstsq(A, B, rcond=None)
+    return coeffs.reshape(8)
+
+
+def get_pattern_centers(version: int) -> Dict[str, Tuple[float, float]]:
+    """Return canonical (x, y) coordinates of finder and bottom-right alignment centers in module units."""
+    size = get_qr_dimension(version)
+    centers = {
+        "top_left_finder": (3.5, 3.5),
+        "bottom_left_finder": (3.5, size - 3.5),
+        "top_right_finder": (size - 3.5, 3.5),
+    }
+    if version >= 2:
+        align_pos = consts.ALIGNMENT_POS[version - 2][-1]
+        centers["bottom_right_alignment"] = (align_pos + 0.5, align_pos + 0.5)
+    return centers
 
 
 def detect_qr_version_from_timing(
@@ -181,47 +244,113 @@ def detect_qr_version_from_timing(
     position,
     scale: int = 10,
     min_version: int = 1,
+    target_version_hint: Optional[int] = None,
 ) -> Tuple[Optional[int], Optional[Image.Image]]:
     """Determine the exact QR version by evaluating finder patterns and timing patterns.
 
-    Rectifies candidate version grids using the detected barcode bounding
-    quadrilateral, verifies structural finder pattern alignment at top-right and
-    bottom-left, and checks timing pattern module alternations on row 6.
+    Rectifies candidate version grids using true projective homography (perspective
+    transform) from the detected barcode quadrilateral, verifies structural finder
+    pattern alignment at top-right and bottom-left, and checks alternating timing
+    patterns on row 6 and column 6.
 
     Args:
-        img:         Pillow image containing the QR code.
-        position:    Barcode position object from zxing-cpp.
-        scale:       Pixel sampling scale factor (default 10).
-        min_version: Minimum candidate QR version based on public data length.
+        img:                 Pillow image containing the QR code.
+        position:            Barcode position object with top_left, bottom_left,
+                             bottom_right, and top_right attributes (and optional
+                             pattern centroids).
+        scale:               Pixel sampling scale factor (default 10).
+        min_version:         Minimum candidate QR version based on public data length.
+        target_version_hint: Optional candidate version from client detector.
 
     Returns:
         (best_version, rectified_image) or (None, None) if unresolved.
     """
-    quad = (
-        position.top_left.x, position.top_left.y,
-        position.bottom_left.x, position.bottom_left.y,
-        position.bottom_right.x, position.bottom_right.y,
-        position.top_right.x, position.top_right.y
+    has_pattern_centers = (
+        hasattr(position, "top_left_finder") and position.top_left_finder is not None
+        and hasattr(position, "bottom_left_finder") and position.bottom_left_finder is not None
+        and hasattr(position, "top_right_finder") and position.top_right_finder is not None
     )
+
+    src_pts_outer = [
+        (float(position.top_left.x), float(position.top_left.y)),
+        (float(position.bottom_left.x), float(position.bottom_left.y)),
+        (float(position.bottom_right.x), float(position.bottom_right.y)),
+        (float(position.top_right.x), float(position.top_right.y)),
+    ]
+
     best_ver: Optional[int] = None
     best_score = -1.0
     best_rect: Optional[Image.Image] = None
 
+    # Prioritize target_version_hint if provided and valid
+    candidate_versions: List[int] = []
+    if target_version_hint is not None and max(1, min_version) <= target_version_hint <= 40:
+        candidate_versions.append(target_version_hint)
     for ver in range(max(1, min_version), 41):
+        if ver not in candidate_versions:
+            candidate_versions.append(ver)
+
+    for ver in candidate_versions:
         size = get_qr_dimension(ver)
         rect_dim = size * scale
-        rect = img.transform((rect_dim, rect_dim), Image.Transform.QUAD, quad)
+
+        use_patterns = (
+            has_pattern_centers
+            and ver >= 2
+            and hasattr(position, "bottom_right_alignment")
+            and position.bottom_right_alignment is not None
+        )
+
+        if use_patterns:
+            align_pos = consts.ALIGNMENT_POS[ver - 2][-1]
+            src_pts = [
+                (float(position.top_left_finder.x), float(position.top_left_finder.y)),
+                (float(position.bottom_left_finder.x), float(position.bottom_left_finder.y)),
+                (float(position.bottom_right_alignment.x), float(position.bottom_right_alignment.y)),
+                (float(position.top_right_finder.x), float(position.top_right_finder.y)),
+            ]
+            dst_pts = [
+                (3.5 * scale, 3.5 * scale),
+                (3.5 * scale, (size - 3.5) * scale),
+                ((align_pos + 0.5) * scale, (align_pos + 0.5) * scale),
+                ((size - 3.5) * scale, 3.5 * scale),
+            ]
+        else:
+            src_pts = src_pts_outer
+            dst_pts = [
+                (0.0, 0.0),
+                (0.0, float(rect_dim)),
+                (float(rect_dim), float(rect_dim)),
+                (float(rect_dim), 0.0),
+            ]
+
+        coeffs = find_perspective_coeffs(src_pts, dst_pts)
+        rect = img.transform(
+            (rect_dim, rect_dim),
+            Image.Transform.PERSPECTIVE,
+            coeffs,
+            Image.Resampling.BICUBIC,
+        )
 
         # 1. Structural Finder Pattern Verification:
         # Top-right finder is at (0, size - 7); Bottom-left finder is at (size - 7, 0)
-        if not _verify_finder_pattern(rect, 0, size - 7, scale):
+        is_hint = (target_version_hint is not None and ver == target_version_hint)
+        min_c = 4.0 if is_hint else 10.0
+        ok_tr, th_tr = _verify_finder_pattern(rect, 0, size - 7, scale, min_contrast=min_c)
+        if not ok_tr and not is_hint:
             continue
-        if not _verify_finder_pattern(rect, size - 7, 0, scale):
+        ok_bl, th_bl = _verify_finder_pattern(rect, size - 7, 0, scale, min_contrast=min_c)
+        if not ok_bl and not is_hint:
             continue
 
-        # 2. Timing pattern along row 6 between column 8 and column (size - 9)
+        timing_threshold = (th_tr + th_bl) / 2.0
+        if is_hint and best_rect is None:
+            best_ver = ver
+            best_rect = rect
+
+        # 2. Timing pattern along row 6 and column 6
         correct = 0
-        total = size - 16
+        total = (size - 16) * 2
         if total <= 0:
             best_ver = ver
             best_rect = rect
@@ -231,7 +360,15 @@ def detect_qr_version_from_timing(
             expected = 1 if (c % 2 == 0) else 0
             px_val = rect.getpixel((c * scale + scale // 2, 6 * scale + scale // 2))
             luma = px_val[0] if isinstance(px_val, tuple) else px_val
-            detected = 1 if luma < 128 else 0
+            detected = 1 if luma < timing_threshold else 0
+            if detected == expected:
+                correct += 1
+
+        for r in range(8, size - 8):
+            expected = 1 if (r % 2 == 0) else 0
+            px_val = rect.getpixel((6 * scale + scale // 2, r * scale + scale // 2))
+            luma = px_val[0] if isinstance(px_val, tuple) else px_val
+            detected = 1 if luma < timing_threshold else 0
             if detected == expected:
                 correct += 1
 
@@ -240,7 +377,7 @@ def detect_qr_version_from_timing(
             best_score = score
             best_ver = ver
             best_rect = rect
-            if score >= 0.90:  # Confirmed match
+            if score >= 0.80:  # Confirmed match
                 break
 
     if best_ver is None:

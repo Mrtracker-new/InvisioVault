@@ -40,10 +40,11 @@ import os
 import secrets
 import struct
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Sequence
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw
+from reedsolo import RSCodec, ReedSolomonError
 import segno
 import zxingcpp
 try:
@@ -69,9 +70,11 @@ from utils.qr_container import (
 from utils.qr_module_map import (
     detect_qr_version_from_timing,
     deterministic_permute,
+    find_perspective_coeffs,
     get_qr_dimension,
     get_safe_data_modules,
     get_structural_modules,
+    verify_finder_pattern,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +82,11 @@ logger = logging.getLogger(__name__)
 # Constants
 DEFAULT_BORDER: int = 4  # ISO/IEC 18004 specifies >= 4 modules quiet zone
 MAX_SAFE_QR_VERSION: int = 22  # Avoid unreadable dense matrices (> 105x105)
-VISUAL_MODULATION_DELTA: int = 28  # Safe pixel luminance modulation delta
+VISUAL_MODULATION_DELTA: int = 28  # Safe pixel luminance modulation delta (legacy)
+DARK_MODULATION_DELTA: int = 45    # Optimized optical SNR for dark modules (immune to white blooming)
+LIGHT_MODULATION_DELTA: int = 28   # Fallback modulation delta for light modules
+RS_HEADER_ECC_BYTES: int = 8       # Parity bytes for 16B container header (corrects up to 4 byte errors)
+RS_BODY_ECC_BYTES: int = 24        # Parity bytes for payload body (corrects up to 12 byte errors)
 MAX_SAFE_STREAM_BYTES: int = 2_000  # Maximum safe secret text size in bytes
 MAX_SAFE_VISUAL_BYTES: int = 1_200  # Maximum safe visual secret text size
 
@@ -246,34 +253,19 @@ def get_qr_capacity_info(public_data: str, scale: int = 10, method: str = "auto"
     # Total binary capacity of v20 at Level M is 1,663 bytes.
     # Base64 expansion is 4/3, overhead is prefix (8B) + header/salt (32B).
     # We cap at 1,273 bytes (standard Level H limit) to ensure conservative safety.
-    MAX_CAPACITY_CEILING = 1273
-    available_b64 = max(0, MAX_CAPACITY_CEILING - public_bytes_len - len("#IVDATA:"))
-    raw_stream_capacity = max(0, int(available_b64 * 3 / 4) - 1)
-    safe_stream_capacity = min(MAX_CAPACITY_CEILING, raw_stream_capacity)
-
-    # Visual mode capacity at Version 15 (5,689 safe data modules = 711 bytes)
-    safe_visual_capacity = min(MAX_CAPACITY_CEILING, max(0, int((711 - 16) * 3 / 4)))
-
-    if method == "visual":
-        safe_bytes = safe_visual_capacity
-        rec_version = 15
-        rec_ecc = "M"
-    elif method == "stream":
-        safe_bytes = safe_stream_capacity
-        rec_version = 18
-        rec_ecc = "M"
-    else:  # auto
-        safe_bytes = safe_stream_capacity
-        rec_version = 16
-        rec_ecc = "M"
+    # Safe visual capacity at MAX_SAFE_QR_VERSION (v22)
+    # Safe data modules for v22: 8,826 bits = 1,103 bytes.
+    # Container overhead: 16B header + 16B salt + Fernet token overhead (~57B) + padding (~15B) = ~104B.
+    safe_mods_count = len(get_safe_data_modules(MAX_SAFE_QR_VERSION))
+    safe_visual_capacity = max(0, (safe_mods_count // 8) - 104)
 
     return {
-        "safeCapacityBytes": safe_bytes,
+        "safeCapacityBytes": safe_visual_capacity,
         "maxSafeVersion": MAX_SAFE_QR_VERSION,
-        "recommendedErrorCorrection": rec_ecc,
-        "recommendedVersion": rec_version,
+        "recommendedErrorCorrection": "M",
+        "recommendedVersion": 15,
         "publicDataLength": public_bytes_len,
-        "method": method,
+        "method": "visual",
     }
 
 
@@ -282,11 +274,42 @@ def calculate_qr_capacity(public_data: str, scale: int = 10) -> int:
 
     Maintains backward compatibility with route callers expecting an integer.
     """
-    info = get_qr_capacity_info(public_data, scale, method="auto")
+    info = get_qr_capacity_info(public_data, scale, method="visual")
     return info["safeCapacityBytes"]
 
 
 # ── Visual Module Embedding & Extraction ──────────────────────────────────────
+
+def _count_white_neighbors(matrix: Sequence[Sequence[int]], r: int, c: int) -> int:
+    """Count white (0) cardinal neighbors around module (r, c)."""
+    size = len(matrix)
+    wn = 0
+    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < size and 0 <= nc < size:
+            if matrix[nr][nc] == 0:
+                wn += 1
+        else:
+            wn += 1  # Out-of-bounds border is white quiet zone
+    return wn
+
+
+def _order_dark_modules(
+    dark_mods: Sequence[Tuple[int, int]],
+    matrix: Sequence[Sequence[int]],
+    seed_material: bytes,
+) -> List[Tuple[int, int]]:
+    """Order safe dark modules by ascending white neighbor count (lowest optical bleed first)."""
+    seed = hashlib.sha256(seed_material + b"_ordered_dark").digest()
+
+    def _key(mod: Tuple[int, int]):
+        r, c = mod
+        wn = _count_white_neighbors(matrix, r, c)
+        h = hashlib.sha256(seed + f"{r},{c}".encode("utf-8")).digest()
+        return (wn, h)
+
+    return sorted(dark_mods, key=_key)
+
 
 def _select_qr_version_for_visual(
     payload_len_bits: int,
@@ -294,6 +317,19 @@ def _select_qr_version_for_visual(
     max_version: int = MAX_SAFE_QR_VERSION,
 ) -> int:
     """Find the smallest QR version (up to max_version) that holds payload_len_bits."""
+    # Priority 1: Pick version where 100% of payload fits in safe dark modules (zero white blooming)
+    for ver in range(2, max_version + 1):
+        try:
+            qr = segno.make(public_data, version=ver, error="m", boost_error=False)
+            m = qr.matrix
+            safe_mods = get_safe_data_modules(ver)
+            dark_safe = [mod for mod in safe_mods if m[mod[0]][mod[1]] == 1]
+            if len(dark_safe) >= payload_len_bits:
+                return ver
+        except Exception:
+            continue
+
+    # Priority 2: Fallback to all safe modules (both dark and light) if payload is very large
     for ver in range(2, max_version + 1):
         safe_mods = get_safe_data_modules(ver)
         if len(safe_mods) >= payload_len_bits:
@@ -302,8 +338,10 @@ def _select_qr_version_for_visual(
                 return ver
             except Exception:
                 continue
+
     raise QRStegoError(
-        f"Hidden payload exceeds safe visual capacity for QR codes up to version {max_version}.",
+        "This secret is too large to fit safely inside a visual steganographic QR code. "
+        "Please shorten the secret message.",
         error_code=QRErrorCode.CAPACITY_EXCEEDED,
     )
 
@@ -317,18 +355,27 @@ def _embed_visual_qr(
     bg_color: str = "#FFFFFF",
     scale: int = 10,
     border: int = DEFAULT_BORDER,
-    delta: int = VISUAL_MODULATION_DELTA,
+    delta: int = DARK_MODULATION_DELTA,
     logo_path: Optional[str] = None,
 ) -> str:
     """Embed hidden secret into safe data modules of a clean visible QR code."""
-    # 1. Pack container
+    # 1. Pack container and apply 2-Stage Reed-Solomon Forward Error Correction
     container = pack_qr_container(secret_text, password)
+    header = container[:16]
+    body = container[16:]
+
+    rsc_hdr = RSCodec(RS_HEADER_ECC_BYTES)
+    rsc_body = RSCodec(RS_BODY_ECC_BYTES)
+    hdr_fec = rsc_hdr.encode(header)
+    body_fec = rsc_body.encode(body)
+    fec_stream = bytes(hdr_fec + body_fec)
+
     bits: List[int] = []
-    for b in container:
+    for b in fec_stream:
         for bit_idx in range(7, -1, -1):
             bits.append((b >> bit_idx) & 1)
 
-    # 2. Select QR version
+    # 2. Select QR version prioritizing safe dark modules (zero white blooming)
     ver = _select_qr_version_for_visual(len(bits), public_data)
     safe_mods = get_safe_data_modules(ver)
 
@@ -337,10 +384,15 @@ def _embed_visual_qr(
     matrix = [bytearray(row) for row in qr.matrix]
     qr_size = len(matrix)
 
-    # 4. Deterministic permutation across safe modules
+    # 4. Safe modules & Low-Bleed Ordering (Dark-Priority with Neighbor Bleed Minimization)
     seed_material = f"{public_data}|{ver}|{qr_size}".encode("utf-8")
-    perm_seed = hashlib.sha256(seed_material).digest()
-    permuted_mods = deterministic_permute(safe_mods, perm_seed)
+    dark_safe = [m for m in safe_mods if matrix[m[0]][m[1]] == 1]
+    light_safe = [m for m in safe_mods if matrix[m[0]][m[1]] == 0]
+
+    ordered_dark = _order_dark_modules(dark_safe, matrix, seed_material)
+    seed_light = hashlib.sha256(seed_material + b"_light").digest()
+    perm_light = deterministic_permute(light_safe, seed_light)
+    permuted_mods = ordered_dark + perm_light
 
     mod_bit_map = {}
     for idx, bit in enumerate(bits):
@@ -354,7 +406,7 @@ def _embed_visual_qr(
     img_size = (qr_size + 2 * border) * scale
     structural = get_structural_modules(ver)
     dark_adj = _adjust_luma(fg_rgb, delta)
-    light_adj = _adjust_luma(bg_rgb, -delta)
+    light_adj = _adjust_luma(bg_rgb, -LIGHT_MODULATION_DELTA)
 
     arr = np.full((img_size, img_size, 3), bg_rgb, dtype=np.uint8)
     for r in range(qr_size):
@@ -387,11 +439,122 @@ def _embed_visual_qr(
     return output_path
 
 
+class QRPoint:
+    """Simple 2D point representation for QR geometry."""
+
+    def __init__(self, x: float, y: float):
+        self.x = float(x)
+        self.y = float(y)
+
+
+class QRPosition:
+    """Unified quadrilateral position container with optional pattern centroids."""
+
+    def __init__(
+        self,
+        top_left: Any,
+        bottom_left: Any,
+        bottom_right: Any,
+        top_right: Any,
+        top_left_finder: Any = None,
+        bottom_left_finder: Any = None,
+        top_right_finder: Any = None,
+        bottom_right_alignment: Any = None,
+    ):
+        self.top_left = top_left if hasattr(top_left, "x") else QRPoint(top_left[0], top_left[1])
+        self.bottom_left = bottom_left if hasattr(bottom_left, "x") else QRPoint(bottom_left[0], bottom_left[1])
+        self.bottom_right = bottom_right if hasattr(bottom_right, "x") else QRPoint(bottom_right[0], bottom_right[1])
+        self.top_right = top_right if hasattr(top_right, "x") else QRPoint(top_right[0], top_right[1])
+        self.top_left_finder = (
+            top_left_finder if (top_left_finder is None or hasattr(top_left_finder, "x"))
+            else QRPoint(top_left_finder[0], top_left_finder[1])
+        )
+        self.bottom_left_finder = (
+            bottom_left_finder if (bottom_left_finder is None or hasattr(bottom_left_finder, "x"))
+            else QRPoint(bottom_left_finder[0], bottom_left_finder[1])
+        )
+        self.top_right_finder = (
+            top_right_finder if (top_right_finder is None or hasattr(top_right_finder, "x"))
+            else QRPoint(top_right_finder[0], top_right_finder[1])
+        )
+        self.bottom_right_alignment = (
+            bottom_right_alignment if (bottom_right_alignment is None or hasattr(bottom_right_alignment, "x"))
+            else QRPoint(bottom_right_alignment[0], bottom_right_alignment[1])
+        )
+
+
+def _parse_client_corners(corners: Any) -> Optional[QRPosition]:
+    """Normalize client-provided corner coordinates into a QRPosition object."""
+    if not corners or not isinstance(corners, dict):
+        return None
+    try:
+        def _parse_pt(p):
+            if not p:
+                return None
+            if hasattr(p, "x") and hasattr(p, "y"):
+                return QRPoint(float(p.x), float(p.y))
+            if isinstance(p, dict) and "x" in p and "y" in p:
+                return QRPoint(float(p["x"]), float(p["y"]))
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                return QRPoint(float(p[0]), float(p[1]))
+            return None
+
+        # Format A: jsQR location object
+        if "topLeftCorner" in corners and "topRightCorner" in corners:
+            tl = _parse_pt(corners.get("topLeftCorner"))
+            bl = _parse_pt(corners.get("bottomLeftCorner"))
+            br = _parse_pt(corners.get("bottomRightCorner"))
+            tr = _parse_pt(corners.get("topRightCorner"))
+            tl_f = _parse_pt(corners.get("topLeftFinderPattern"))
+            bl_f = _parse_pt(corners.get("bottomLeftFinderPattern"))
+            tr_f = _parse_pt(corners.get("topRightFinderPattern"))
+            br_a = _parse_pt(corners.get("bottomRightAlignmentPattern"))
+            if tl and bl and br and tr:
+                return QRPosition(tl, bl, br, tr, tl_f, bl_f, tr_f, br_a)
+
+        # Format B: snake_case keys
+        if "top_left" in corners and "top_right" in corners:
+            tl = _parse_pt(corners.get("top_left"))
+            bl = _parse_pt(corners.get("bottom_left"))
+            br = _parse_pt(corners.get("bottom_right"))
+            tr = _parse_pt(corners.get("top_right"))
+            tl_f = _parse_pt(corners.get("top_left_finder"))
+            bl_f = _parse_pt(corners.get("bottom_left_finder"))
+            tr_f = _parse_pt(corners.get("top_right_finder"))
+            br_a = _parse_pt(corners.get("bottom_right_alignment"))
+            if tl and bl and br and tr:
+                return QRPosition(tl, bl, br, tr, tl_f, bl_f, tr_f, br_a)
+    except Exception as exc:
+        logger.debug("Failed to parse client corners: %s", exc)
+    return None
+def _count_all_white_neighbors(matrix: Sequence[Sequence[int]], r: int, c: int) -> float:
+    """Calculate effective white neighbor optical bleed (cardinal + diagonal)."""
+    size = len(matrix)
+    wn = 0.0
+    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < size and 0 <= nc < size:
+            if matrix[nr][nc] == 0:
+                wn += 1.0
+        else:
+            wn += 1.0
+    for dr, dc in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < size and 0 <= nc < size:
+            if matrix[nr][nc] == 0:
+                wn += 0.4
+        else:
+            wn += 0.4
+    return wn
+
+
 def _extract_visual_qr(
     img: Image.Image,
     position,
     public_data: str,
     password: Optional[str] = None,
+    client_version: Optional[int] = None,
+    debug_info: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str]:
     """Extract hidden payload from the safe data modules of a rectified QR code."""
     # Calculate minimum possible QR version that can hold public_data
@@ -400,74 +563,343 @@ def _extract_visual_qr(
     except Exception:
         min_version = 1
 
+    scale = 10
+    target_ver = None
+    rectified = None
+
     target_ver, rectified = detect_qr_version_from_timing(
-        img, position, min_version=min_version
+        img, position, min_version=min_version, target_version_hint=client_version
     )
+
     if target_ver is None or rectified is None:
+        if debug_info is not None:
+            debug_info["failureReason"] = "INVALID_VERSION"
         return public_data, ""
 
-    scale = 10
     qr_size = get_qr_dimension(target_ver)
     qr_ref = segno.make(public_data, version=target_ver, error="m", boost_error=False)
     ref_matrix = qr_ref.matrix
+    structural = get_structural_modules(target_ver)
 
-    # Calibrate baseline dark and light luminance directly from structural finder patterns
-    dark_samples: List[int] = []
-    for dr in range(2, 5):
-        for dc in range(2, 5):
-            px = rectified.getpixel((dc * scale + scale // 2, dr * scale + scale // 2))
-            dark_samples.append(px[0] if isinstance(px, tuple) else px)
-    dark_base = sum(dark_samples) / len(dark_samples)
+    # Collect known unmodulated structural dark and light samples across the entire QR matrix
+    struct_dark_pts: List[Tuple[int, int, float]] = []
+    struct_light_pts: List[Tuple[int, int, float]] = []
 
-    light_samples: List[int] = []
-    for dc in range(1, 6):
-        px1 = rectified.getpixel((dc * scale + scale // 2, 1 * scale + scale // 2))
-        px2 = rectified.getpixel((dc * scale + scale // 2, 5 * scale + scale // 2))
-        light_samples.append(px1[0] if isinstance(px1, tuple) else px1)
-        light_samples.append(px2[0] if isinstance(px2, tuple) else px2)
-    light_base = sum(light_samples) / len(light_samples)
+    for r in range(qr_size):
+        for c in range(qr_size):
+            if (r, c) in structural:
+                samples = []
+                for dy in range(3, 7):
+                    for dx in range(3, 7):
+                        p = rectified.getpixel((c * scale + dx, r * scale + dy))
+                        samples.append(p[0] if isinstance(p, tuple) else p)
+                samples.sort()
+                avg = sum(samples[2:-2]) / (len(samples) - 4)
+                if ref_matrix[r][c] == 1:
+                    struct_dark_pts.append((r, c, float(avg)))
+                else:
+                    struct_light_pts.append((r, c, float(avg)))
 
-    contrast = light_base - dark_base
-    if contrast < 15:
-        return public_data, ""
+    # Reject occluded structural points (e.g. from central logos or foreign watermarks)
+    if struct_dark_pts and struct_light_pts:
+        med_dark = float(np.median([v for _, _, v in struct_dark_pts]))
+        med_light = float(np.median([v for _, _, v in struct_light_pts]))
+        if med_light > med_dark + 30.0:
+            mid = (med_dark + med_light) / 2.0
+            struct_dark_pts = [(r, c, v) for (r, c, v) in struct_dark_pts if v < mid]
+            struct_light_pts = [(r, c, v) for (r, c, v) in struct_light_pts if v > mid]
 
-    effective_delta = max(6.0, VISUAL_MODULATION_DELTA * (contrast / 255.0))
-    threshold_dark = dark_base + (effective_delta * 0.45)
-    threshold_light = light_base - (effective_delta * 0.45)
+    def _fit_plane(pts: List[Tuple[int, int, float]], default_val: float) -> Tuple[float, float, float]:
+        if len(pts) >= 3:
+            A = np.array([[r, c, 1.0] for (r, c, _) in pts], dtype=float)
+            Y = np.array([v for (_, _, v) in pts], dtype=float)
+            coeffs, _, _, _ = np.linalg.lstsq(A, Y, rcond=None)
+            return float(coeffs[0]), float(coeffs[1]), float(coeffs[2])
+        elif pts:
+            avg = sum(v for _, _, v in pts) / len(pts)
+            return 0.0, 0.0, float(avg)
+        return 0.0, 0.0, default_val
+
+    p_dark = _fit_plane(struct_dark_pts, default_val=0.0)
+    p_light = _fit_plane(struct_light_pts, default_val=255.0)
+
+    center_r, center_c = qr_size / 2.0, qr_size / 2.0
+    dark_at_center = p_dark[0] * center_r + p_dark[1] * center_c + p_dark[2]
+    light_at_center = p_light[0] * center_r + p_light[1] * center_c + p_light[2]
+    contrast = light_at_center - dark_at_center
+
+    effective_delta = DARK_MODULATION_DELTA * max(0.04, contrast / 255.0)
+
+    if debug_info is not None:
+        debug_info["clientVersion"] = client_version
+        debug_info["detectedVersion"] = target_ver
+        debug_info["qrDimension"] = qr_size
+        debug_info["contrast"] = round(float(contrast), 2)
+        debug_info["darkBaseline"] = round(float(dark_at_center), 2)
+        debug_info["lightBaseline"] = round(float(light_at_center), 2)
+        debug_info["effectiveDelta"] = round(float(effective_delta), 2)
 
     safe_mods = get_safe_data_modules(target_ver)
     seed_material = f"{public_data}|{target_ver}|{qr_size}".encode("utf-8")
-    perm_seed = hashlib.sha256(seed_material).digest()
-    permuted_mods = deterministic_permute(safe_mods, perm_seed)
 
-    # Read header bits (16 bytes = 128 bits)
-    header_bits: List[int] = []
-    for idx in range(128):
-        if idx >= len(permuted_mods):
-            break
-        r, c = permuted_mods[idx]
+    dark_safe = [m for m in safe_mods if ref_matrix[m[0]][m[1]] == 1]
+    light_safe = [m for m in safe_mods if ref_matrix[m[0]][m[1]] == 0]
+
+    # Permutations for candidate decoding
+    # 1. Low-bleed ordered dark + light (2-Stage Reed-Solomon FEC format)
+    ordered_dark = _order_dark_modules(dark_safe, ref_matrix, seed_material)
+    seed_light = hashlib.sha256(seed_material + b"_light").digest()
+    perm_light = deterministic_permute(light_safe, seed_light)
+    permuted_mods_fec = ordered_dark + perm_light
+
+    # 2. Dark-priority hash permuted (non-FEC dark-priority format)
+    seed_dark = hashlib.sha256(seed_material + b"_dark").digest()
+    perm_dark = deterministic_permute(dark_safe, seed_dark)
+    permuted_mods_dark_priority = perm_dark + perm_light
+
+    # 3. Legacy uniform permutation (original format)
+    perm_seed_legacy = hashlib.sha256(seed_material).digest()
+    permuted_mods_legacy = deterministic_permute(safe_mods, perm_seed_legacy)
+
+    bleed_factor = min(2.5, max(0.0, (contrast / 255.0) * 2.5))
+
+    def _sample_module_bit(r: int, c: int, thresh_factor: float = 0.60) -> int:
         is_dark = (ref_matrix[r][c] == 1)
-        samples: List[int] = []
-        for dy in range(3, 7):
-            for dx in range(3, 7):
+        base_val = (
+            (p_dark[0] * r + p_dark[1] * c + p_dark[2])
+            if is_dark
+            else (p_light[0] * r + p_light[1] * c + p_light[2])
+        )
+        eff_wn = _count_all_white_neighbors(ref_matrix, r, c)
+        thresh_delta = max(6.0, effective_delta * thresh_factor)
+        if is_dark:
+            thresh = base_val + (eff_wn * bleed_factor) + thresh_delta
+        else:
+            eff_dn = 5.6 - eff_wn
+            thresh = base_val - (eff_dn * bleed_factor * 0.5) - thresh_delta
+
+        samples = []
+        for dy in range(4, 7):
+            for dx in range(4, 7):
                 px = rectified.getpixel((c * scale + dx, r * scale + dy))
                 luma = px[0] if isinstance(px, tuple) else px
                 samples.append(luma)
-        avg = sum(samples) / len(samples)
+        # Trimmed mean (discard 1 lowest and 1 highest out of 9 samples)
+        samples.sort()
+        avg = sum(samples[1:-1]) / (len(samples) - 2) if len(samples) > 2 else sum(samples) / len(samples)
+
         if is_dark:
-            bit = 1 if avg > threshold_dark else 0
+            return 1 if avg > thresh else 0
         else:
-            bit = 1 if avg < threshold_light else 0
-        header_bits.append(bit)
+            return 1 if avg < thresh else 0
+
+    scan_id = debug_info.get("cameraScanId") if debug_info else None
+    debug_capture_enabled = os.getenv("DEBUG_CAMERA_CAPTURE", "false").strip().lower() == "true"
+
+    def _save_debug_vis(candidate_mods: List[Tuple[int, int]], bits_sampled: List[int]):
+        if not (scan_id and debug_capture_enabled and rectified is not None):
+            return
+        try:
+            debug_dir = os.path.join("uploads", "debug")
+            os.makedirs(debug_dir, exist_ok=True)
+            rect_path = os.path.join(debug_dir, f"debug_rectified_qr_{scan_id}.png")
+            rect_latest = os.path.join(debug_dir, "debug_rectified_qr_latest.png")
+            rectified.save(rect_path)
+            rectified.save(rect_latest)
+
+            vis_img = rectified.convert("RGB").copy()
+            draw = ImageDraw.Draw(vis_img)
+            # Structural markers in cyan
+            for sr, sc in structural:
+                cx = sc * scale + scale // 2
+                cy = sr * scale + scale // 2
+                draw.rectangle([cx - 1, cy - 1, cx + 1, cy + 1], fill=(0, 255, 255))
+            # Sampled module markers: green if 1, red if 0
+            for idx in range(min(len(bits_sampled), len(candidate_mods))):
+                mr, mc = candidate_mods[idx]
+                bit = bits_sampled[idx]
+                cx = mc * scale + scale // 2
+                cy = mr * scale + scale // 2
+                col = (0, 255, 0) if bit == 1 else (255, 0, 0)
+                draw.rectangle([cx - 1, cy - 1, cx + 1, cy + 1], fill=col)
+
+            sampled_path = os.path.join(debug_dir, f"debug_sampled_modules_{scan_id}.png")
+            sampled_latest = os.path.join(debug_dir, "debug_sampled_modules_latest.png")
+            vis_img.save(sampled_path)
+            vis_img.save(sampled_latest)
+            logger.debug("Saved debug rectified and sampled module visualizations for %s", scan_id)
+        except Exception as v_err:
+            logger.debug("Failed to save debug visualizations: %s", v_err)
+
+    # ── PATH 1: 2-Stage Reed-Solomon Forward Error Correction (Low-Bleed Dark Ordering) ──
+    hdr_total_fec_bytes = 16 + RS_HEADER_ECC_BYTES  # 24 bytes = 192 bits
+    if len(permuted_mods_fec) >= hdr_total_fec_bytes * 8:
+        rsc_hdr = RSCodec(RS_HEADER_ECC_BYTES)
+        dec_hdr = None
+        best_tf = None
+        fec_hdr_bits: List[int] = []
+
+        candidate_tfs = [0.60, 0.58, 0.62, 0.55, 0.52, 0.65, 0.50, 0.45, 0.40, 0.35, 0.30, 0.25]
+        for tf in candidate_tfs:
+            cur_hdr_bits = [
+                _sample_module_bit(r, c, thresh_factor=tf)
+                for r, c in permuted_mods_fec[:hdr_total_fec_bytes * 8]
+            ]
+            raw_hdr_fec_bytes = bytearray()
+            for b_idx in range(0, len(cur_hdr_bits) - 7, 8):
+                byte_val = 0
+                for bit_idx in range(8):
+                    byte_val = (byte_val << 1) | cur_hdr_bits[b_idx + bit_idx]
+                raw_hdr_fec_bytes.append(byte_val)
+
+            try:
+                dec_hdr_res, _, _ = rsc_hdr.decode(bytes(raw_hdr_fec_bytes))
+                res_bytes = bytes(dec_hdr_res)
+                if len(res_bytes) >= 16 and res_bytes[:4] == QR_CONTAINER_MAGIC:
+                    dec_hdr = res_bytes
+                    best_tf = tf
+                    fec_hdr_bits = cur_hdr_bits
+                    break
+            except ReedSolomonError:
+                continue
+
+        if dec_hdr is not None:
+            magic, version, flags, orig_len, payload_len = struct.unpack(
+                ">4sBBII", dec_hdr[:14]
+            )
+            is_encrypted = bool(flags & 0x01)
+            if is_encrypted and not password:
+                _save_debug_vis(permuted_mods_fec, fec_hdr_bits)
+                if debug_info is not None:
+                    debug_info["ivqrMagicDetected"] = True
+                    debug_info["failureReason"] = "WRONG_PASSWORD"
+                raise QRStegoError(
+                    "This QR code is password protected. Please provide the password.",
+                    error_code=QRErrorCode.WRONG_PASSWORD,
+                )
+
+            rsc_body = RSCodec(RS_BODY_ECC_BYTES)
+            body_fec_len = len(rsc_body.encode(b"\x00" * payload_len))
+            total_fec_bits = (hdr_total_fec_bytes + body_fec_len) * 8
+
+            if total_fec_bits <= len(permuted_mods_fec):
+                body_candidate_tfs = [best_tf] + [
+                    round(t, 2) for t in [
+                        # Fine-grained steps around the header's best threshold
+                        best_tf - 0.01, best_tf + 0.01,
+                        best_tf - 0.02, best_tf + 0.02,
+                        best_tf - 0.03, best_tf + 0.03,
+                        best_tf - 0.05, best_tf + 0.05,
+                        best_tf - 0.10, best_tf + 0.10,
+                        # Global coarse sweep for heavily-distorted frames
+                        0.60, 0.58, 0.62, 0.55, 0.52, 0.65, 0.50,
+                        0.45, 0.40, 0.35, 0.30, 0.25, 0.70, 0.75,
+                    ]
+                    if round(t, 2) != round(best_tf, 2) and 0.15 <= t <= 0.85
+                ]
+                dec_body = None
+                fec_body_bits: List[int] = []
+
+                for b_tf in body_candidate_tfs:
+                    cur_body_bits = [
+                        _sample_module_bit(r, c, thresh_factor=b_tf)
+                        for r, c in permuted_mods_fec[hdr_total_fec_bytes * 8 : total_fec_bits]
+                    ]
+                    raw_body_fec_bytes = bytearray()
+                    for b_idx in range(0, len(cur_body_bits) - 7, 8):
+                        byte_val = 0
+                        for bit_idx in range(8):
+                            byte_val = (byte_val << 1) | cur_body_bits[b_idx + bit_idx]
+                        raw_body_fec_bytes.append(byte_val)
+
+                    try:
+                        dec_body_res, _, _ = rsc_body.decode(bytes(raw_body_fec_bytes[:body_fec_len]))
+                        dec_body = bytes(dec_body_res)
+                        fec_body_bits = cur_body_bits
+                        break
+                    except ReedSolomonError:
+                        continue
+
+                if dec_body is None:
+                    _save_debug_vis(permuted_mods_fec, fec_hdr_bits)
+                    if debug_info is not None:
+                        debug_info["ivqrMagicDetected"] = True
+                        debug_info["failureReason"] = "PAYLOAD_DECODE_FAILED"
+                    raise QRStegoError(
+                        "InvisioVault secret payload detected, but optical distortion prevented full recovery. Please hold camera steady.",
+                        error_code=QRErrorCode.HIDDEN_PAYLOAD_CORRUPTED,
+                    )
+
+                container_bytes = dec_hdr[:16] + dec_body[:payload_len]
+                try:
+                    secret_text = unpack_qr_container(container_bytes, password)
+                except ValueError as val_err:
+                    if "password" in str(val_err).lower() or "tampered" in str(val_err).lower():
+                        _save_debug_vis(permuted_mods_fec, fec_hdr_bits + fec_body_bits)
+                        if debug_info is not None:
+                            debug_info["ivqrMagicDetected"] = True
+                            debug_info["failureReason"] = "WRONG_PASSWORD"
+                        raise QRStegoError(str(val_err), error_code=QRErrorCode.WRONG_PASSWORD)
+                    raise
+
+                _save_debug_vis(permuted_mods_fec, fec_hdr_bits + fec_body_bits)
+                if debug_info is not None:
+                    debug_info["ivqrMagicDetected"] = True
+                    debug_info["fecDecoded"] = True
+                    debug_info["failureReason"] = None
+                    debug_info["success"] = True
+                return public_data, secret_text
+
+
+    # ── PATH 2: Dark-Priority Non-FEC (Existing QR Codes) ──
+    header_bits: List[int] = []
+    for idx in range(min(128, len(permuted_mods_dark_priority))):
+        r, c = permuted_mods_dark_priority[idx]
+        header_bits.append(_sample_module_bit(r, c))
 
     header_bytes = bytearray()
-    for b_idx in range(0, len(header_bits), 8):
+    for b_idx in range(0, len(header_bits) - 7, 8):
         byte_val = 0
         for bit_idx in range(8):
             byte_val = (byte_val << 1) | header_bits[b_idx + bit_idx]
         header_bytes.append(byte_val)
 
-    if len(header_bytes) < 16 or bytes(header_bytes[:4]) != QR_CONTAINER_MAGIC:
+    chosen_permuted_mods = permuted_mods_dark_priority
+    is_magic_valid = len(header_bytes) >= 16 and bytes(header_bytes[:4]) == QR_CONTAINER_MAGIC
+
+    # ── PATH 3: Legacy Uniform Non-FEC (Oldest QR Codes) ──
+    if not is_magic_valid:
+        legacy_header_bits: List[int] = []
+        for idx in range(min(128, len(permuted_mods_legacy))):
+            r, c = permuted_mods_legacy[idx]
+            legacy_header_bits.append(_sample_module_bit(r, c))
+
+        legacy_header_bytes = bytearray()
+        for b_idx in range(0, len(legacy_header_bits) - 7, 8):
+            byte_val = 0
+            for bit_idx in range(8):
+                byte_val = (byte_val << 1) | legacy_header_bits[b_idx + bit_idx]
+            legacy_header_bytes.append(byte_val)
+
+        if len(legacy_header_bytes) >= 16 and bytes(legacy_header_bytes[:4]) == QR_CONTAINER_MAGIC:
+            chosen_permuted_mods = permuted_mods_legacy
+            header_bits = legacy_header_bits
+            header_bytes = legacy_header_bytes
+            is_magic_valid = True
+
+    _save_debug_vis(chosen_permuted_mods, header_bits)
+
+    if debug_info is not None:
+        debug_info["ivqrMagicDetected"] = is_magic_valid
+
+    if not is_magic_valid:
+        if debug_info is not None:
+            if contrast < 8.0:
+                debug_info["failureReason"] = "LOW_CONTRAST"
+            elif light_at_center > 248.0 and (light_at_center - dark_at_center) > 180.0:
+                debug_info["failureReason"] = "OPTICAL_SENSOR_SATURATION"
+            else:
+                debug_info["failureReason"] = "NO_HIDDEN_DATA"
         return public_data, ""
 
     magic, version, flags, orig_len, payload_len = struct.unpack(
@@ -476,42 +908,37 @@ def _extract_visual_qr(
     total_container_len = 16 + payload_len
     total_bits = total_container_len * 8
 
-    if total_bits > len(permuted_mods):
-        raise QRStegoError(
-            "Payload length exceeds available safe modules.",
-            error_code=QRErrorCode.PAYLOAD_TRUNCATED,
-        )
+    if total_bits > len(chosen_permuted_mods):
+        if debug_info is not None:
+            debug_info["failureReason"] = "MODULE_SAMPLING_FAILURE"
+        return public_data, ""
 
     all_bits = list(header_bits)
-    for idx in range(128, total_bits):
-        r, c = permuted_mods[idx]
-        is_dark = (ref_matrix[r][c] == 1)
-        samples = []
-        for dy in range(3, 7):
-            for dx in range(3, 7):
-                px = rectified.getpixel((c * scale + dx, r * scale + dy))
-                luma = px[0] if isinstance(px, tuple) else px
-                samples.append(luma)
-        avg = sum(samples) / len(samples)
-        if is_dark:
-            bit = 1 if avg > threshold_dark else 0
-        else:
-            bit = 1 if avg < threshold_light else 0
-        all_bits.append(bit)
+    for idx in range(len(header_bits), total_bits):
+        r, c = chosen_permuted_mods[idx]
+        all_bits.append(_sample_module_bit(r, c))
 
     container_bytes = bytearray()
-    for b_idx in range(0, len(all_bits), 8):
+    for b_idx in range(0, len(all_bits) - 7, 8):
         byte_val = 0
         for bit_idx in range(8):
             byte_val = (byte_val << 1) | all_bits[b_idx + bit_idx]
         container_bytes.append(byte_val)
 
     try:
-        secret_text = unpack_qr_container(bytes(container_bytes), password)
+        secret_text = unpack_qr_container(bytes(container_bytes[:total_container_len]), password)
     except ValueError as e:
         if "password" in str(e).lower() or "tampered" in str(e).lower():
+            if debug_info is not None:
+                debug_info["failureReason"] = "WRONG_PASSWORD"
             raise QRStegoError(str(e), error_code=QRErrorCode.WRONG_PASSWORD)
+        if debug_info is not None:
+            debug_info["failureReason"] = "CRC_FAILURE"
         raise QRStegoError(str(e), error_code=QRErrorCode.HIDDEN_PAYLOAD_CORRUPTED)
+
+    if debug_info is not None:
+        debug_info["failureReason"] = None
+        debug_info["success"] = True
 
     return public_data, secret_text
 
@@ -617,47 +1044,26 @@ def generate_qr_with_stego(
 
     # Determine embedding strategy
     chosen_method = method.lower()
-    if chosen_method == "auto":
-        # Always use robust stream mode by default so that QR codes survive
-        # real-world camera scanning, prints, screenshots, and custom colors.
-        chosen_method = "stream"
+    if chosen_method == "stream":
+        raise QRStegoError(
+            "Stream QR generation is no longer supported. InvisioVault generates clean visual steganographic QR codes.",
+            error_code=QRErrorCode.QR_INVALID,
+        )
+
+    if chosen_method in ("auto", "visual"):
+        chosen_method = "visual"
+    else:
+        raise QRStegoError(
+            f"Unsupported QR generation method '{method}'. InvisioVault generates clean visual steganographic QR codes.",
+            error_code=QRErrorCode.QR_INVALID,
+        )
 
     logger.info(
-        "Generating QR steganography using method='%s' (public_len=%d, secret_len=%d)",
-        chosen_method, len(public_data), len(secret_text)
+        "Generating visual QR steganography (public_len=%d, secret_len=%d)",
+        len(public_data), len(secret_text)
     )
 
-    if chosen_method == "visual":
-        try:
-            return _embed_visual_qr(
-                public_data=public_data,
-                secret_text=secret_text,
-                output_path=output_path,
-                password=password,
-                fg_color=fg_color,
-                bg_color=bg_color,
-                scale=scale,
-                border=DEFAULT_BORDER,
-                logo_path=logo_path,
-            )
-        except QRStegoError as e:
-            if e.error_code == QRErrorCode.CAPACITY_EXCEEDED and method == "auto":
-                # Fall back to stream mode
-                logger.info("Visual capacity exceeded; falling back to optimized stream mode.")
-                return _embed_stream_qr(
-                    public_data=public_data,
-                    secret_text=secret_text,
-                    output_path=output_path,
-                    password=password,
-                    fg_color=fg_color,
-                    bg_color=bg_color,
-                    scale=scale,
-                    border=DEFAULT_BORDER,
-                    logo_path=logo_path,
-                )
-            raise
-
-    return _embed_stream_qr(
+    return _embed_visual_qr(
         public_data=public_data,
         secret_text=secret_text,
         output_path=output_path,
@@ -674,24 +1080,30 @@ def extract_from_qr_stego(
     qr_path: str,
     password: Optional[str] = None,
     raw_qr_text: Optional[str] = None,
+    client_corners: Optional[Dict[str, Any]] = None,
+    client_version: Optional[int] = None,
+    debug_info: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str]:
     """Extract visible data and hidden secret from a QR code image.
 
-    Implements an 8-stage extraction pipeline:
+    Implements a multi-stage robust extraction pipeline:
       0. Client-assisted decode: If raw_qr_text contains #IVDATA:, decode immediately.
-      1. Detect QR location and geometry (ZXing with PyZbar fallback).
-      2. Reconstruct QR module matrix & read visible string.
-      3. If '#IVDATA:' fragment exists: decode & decrypt from stream.
-      4. If no fragment: inspect safe data modules in the visual layer.
-      5. Verify payload container integrity.
-      6. Decrypt ciphertext (if encrypted).
-      7. Decompress payload (if compressed).
-      8. Return (public_data, secret_text).
+      1. Priority geometry resolution:
+         - Client jsQR corners (measured on the exact frame submitted)
+         - Server-side zxing-cpp corners
+         - PyZbar polygon fallback
+      2. Check stream mode (#IVDATA: fragment).
+      3. Perspective-correct visual layer extraction with 2D illumination surface fitting.
+      4. Validate IVQR container integrity, decrypt and decompress.
+      5. Return (public_data, secret_text).
 
     Args:
-        qr_path:     Path to QR code image.
-        password:    Decryption password if the secret was sealed with one.
-        raw_qr_text: Optional decoded QR string from client-side scanner.
+        qr_path:        Path to QR code image.
+        password:       Decryption password if the secret was sealed with one.
+        raw_qr_text:    Optional decoded QR string from client-side scanner.
+        client_corners: Optional corner coordinates {topLeftCorner, ...} from client jsQR.
+        client_version: Optional QR version integer from client jsQR.
+        debug_info:     Optional dictionary to receive structured diagnostic metrics.
 
     Returns:
         (public_data, secret_text)
@@ -700,7 +1112,12 @@ def extract_from_qr_stego(
         QRStegoError: On missing QR, wrong password, or corrupted data.
     """
     try:
-        logger.info("Extracting from QR code: %s (has_raw_text=%s)", qr_path, bool(raw_qr_text))
+        logger.info(
+            "Extracting from QR code: %s (has_raw_text=%s, has_client_corners=%s)",
+            qr_path,
+            bool(raw_qr_text),
+            bool(client_corners),
+        )
 
         # Fast-path: client-side scanner already decoded the full stream container
         if raw_qr_text and "#IVDATA:" in raw_qr_text:
@@ -735,10 +1152,69 @@ def extract_from_qr_stego(
             else:
                 img = raw_img.convert("RGB")
 
-        # Stage 1: Detection via zxing-cpp
+        parsed_client_pos = _parse_client_corners(client_corners)
+
+        # Coordinate scale validation if client corners are provided
+        if parsed_client_pos is not None:
+            pts = [
+                (parsed_client_pos.top_left.x, parsed_client_pos.top_left.y),
+                (parsed_client_pos.bottom_left.x, parsed_client_pos.bottom_left.y),
+                (parsed_client_pos.bottom_right.x, parsed_client_pos.bottom_right.y),
+                (parsed_client_pos.top_right.x, parsed_client_pos.top_right.y),
+            ]
+            img_w, img_h = img.size
+            out_of_bounds = any(x < -15.0 or y < -15.0 or x > img_w + 15.0 or y > img_h + 15.0 for x, y in pts)
+            if out_of_bounds:
+                if debug_info is not None:
+                    debug_info["coordinateScaleValid"] = False
+                    debug_info["failureReason"] = "BAD_COORDINATE_SCALE"
+                    logger.warning("QR scan [%s]: Client corners out of bounds for image %dx%d: %s",
+                                   debug_info.get("cameraScanId"), img_w, img_h, pts)
+            else:
+                if debug_info is not None:
+                    debug_info["coordinateScaleValid"] = True
+        elif client_corners is not None and debug_info is not None:
+            debug_info["failureReason"] = "NO_CLIENT_GEOMETRY"
+
+        # Priority 1: Client geometry from exact same frame (if provided with decoded text)
+        client_attempted = False
+        client_failure_reason = None
+        if parsed_client_pos is not None and raw_qr_text:
+            client_attempted = True
+            if debug_info is not None:
+                debug_info["geometrySource"] = "client_jsqr"
+            try:
+                pub, sec = _extract_visual_qr(
+                    img,
+                    parsed_client_pos,
+                    raw_qr_text,
+                    password=password,
+                    client_version=client_version,
+                    debug_info=debug_info,
+                )
+                if sec:
+                    logger.info(
+                        "Visual extraction complete from client geometry. Public: %d chars, Secret: %d chars.",
+                        len(pub),
+                        len(sec),
+                    )
+                    return pub, sec
+                client_failure_reason = debug_info.get("failureReason") if debug_info else None
+            except QRStegoError:
+                raise
+            except Exception as exc:
+                logger.debug("Visual extraction using client corners produced no payload: %s", exc)
+                client_failure_reason = "EXTRACTION_EXCEPTION"
+
+        # Priority 2: Server-side detection via zxing-cpp
         decoded_objects = []
         try:
-            decoded_objects = zxingcpp.read_barcodes(img)
+            decoded_objects = zxingcpp.read_barcodes(
+                img,
+                try_rotate=True,
+                try_downscale=True,
+                binarizer=zxingcpp.Binarizer.LocalAverage,
+            )
         except Exception as exc:
             logger.debug("zxingcpp read failed: %s, falling back to pyzbar", exc)
 
@@ -748,6 +1224,8 @@ def extract_from_qr_stego(
         if decoded_objects:
             qr_text = decoded_objects[0].text
             position = decoded_objects[0].position
+            if debug_info is not None and not client_attempted:
+                debug_info["geometrySource"] = "server_zxing"
         else:
             # Fallback to pyzbar if available
             pyz_res = pyzbar.decode(img) if pyzbar is not None else None
@@ -755,22 +1233,33 @@ def extract_from_qr_stego(
                 qr_text = pyz_res[0].data.decode("utf-8", errors="replace")
                 if hasattr(pyz_res[0], "polygon") and len(pyz_res[0].polygon) == 4:
                     poly = pyz_res[0].polygon
-                    class _PyzbarPosition:
-                        def __init__(self, p):
-                            self.top_left = p[0]
-                            self.bottom_left = p[1]
-                            self.bottom_right = p[2]
-                            self.top_right = p[3]
-                    position = _PyzbarPosition(poly)
+                    position = QRPosition(poly[0], poly[1], poly[2], poly[3])
+                if debug_info is not None and not client_attempted:
+                    debug_info["geometrySource"] = "server_pyzbar"
             elif raw_qr_text:
                 qr_text = raw_qr_text
+                position = parsed_client_pos
+                if debug_info is not None and not client_attempted:
+                    debug_info["geometrySource"] = "client_fallback"
             else:
+                if debug_info is not None:
+                    debug_info["failureReason"] = "NO_QR"
                 raise QRStegoError(
                     "No QR code found in the image.",
                     error_code=QRErrorCode.QR_NOT_DETECTED,
                 )
 
-        # Stage 2 & 3: Check Stream Mode (#IVDATA:)
+        # Diagnostic consistency check between client raw_qr_text and server qr_text
+        if debug_info is not None:
+            if raw_qr_text and qr_text:
+                if raw_qr_text == qr_text:
+                    debug_info["consistency"] = "CONSISTENT"
+                else:
+                    debug_info["consistency"] = "DATA_MISMATCH"
+            elif raw_qr_text and not decoded_objects:
+                debug_info["consistency"] = "UNVERIFIED_SERVER_DECODER"
+
+        # Check Stream Mode (#IVDATA:)
         if "#IVDATA:" in qr_text:
             parts = qr_text.split("#IVDATA:", maxsplit=1)
             public_data = parts[0]
@@ -786,13 +1275,20 @@ def extract_from_qr_stego(
             )
             return public_data, secret_text
 
-        # Stage 4: Check Visual Module Layer
+        # Check Visual Module Layer with server position
         if position is not None:
             try:
-                pub, sec = _extract_visual_qr(img, position, qr_text, password)
+                pub, sec = _extract_visual_qr(
+                    img,
+                    position,
+                    qr_text,
+                    password=password,
+                    client_version=client_version,
+                    debug_info=debug_info,
+                )
                 if sec:
                     logger.info(
-                        "Extraction complete. Public: %d chars, Secret: %d chars.",
+                        "Extraction complete from server position. Public: %d chars, Secret: %d chars.",
                         len(pub),
                         len(sec),
                     )
@@ -802,7 +1298,36 @@ def extract_from_qr_stego(
             except Exception as exc:
                 logger.debug("Visual extraction check produced no payload: %s", exc)
 
+        # Fallback to client geometry if server position did not recover payload
+        if parsed_client_pos is not None and position != parsed_client_pos:
+            try:
+                pub, sec = _extract_visual_qr(
+                    img,
+                    parsed_client_pos,
+                    qr_text,
+                    password=password,
+                    client_version=client_version,
+                    debug_info=debug_info,
+                )
+                if sec:
+                    logger.info(
+                        "Extraction complete from fallback client geometry. Public: %d chars, Secret: %d chars.",
+                        len(pub),
+                        len(sec),
+                    )
+                    return pub, sec
+            except QRStegoError:
+                raise
+            except Exception as exc:
+                logger.debug("Fallback client geometry produced no payload: %s", exc)
+
         # Regular QR code without hidden data
+        if debug_info is not None:
+            if client_attempted:
+                debug_info["geometrySource"] = "client_jsqr"
+                debug_info["failureReason"] = client_failure_reason or "NO_HIDDEN_DATA"
+            elif not debug_info.get("failureReason"):
+                debug_info["failureReason"] = "NO_HIDDEN_DATA"
         logger.info("Extraction complete. Public: %d chars, Secret: 0 chars.", len(qr_text))
         return qr_text, ""
 
