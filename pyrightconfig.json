@@ -1,0 +1,21 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": [
+    "backend"
+  ],
+  "extraPaths": [
+    "backend",
+    "./backend"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "backend",
+        "./backend"
+      ]
+    }
+  ],
+  "reportMissingTypeStubs": false
+}

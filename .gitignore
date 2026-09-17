@@ -41,6 +41,10 @@ app.log
 
 # Uploads & Temporary Files
 uploads/
+backend/uploads/
+**/uploads/debug/
+*.rgba
+backend/scratch/
 /tmp/
 
 # IDE & Editor
@@ -94,4 +98,6 @@ backend/**/__pycache__/
 
 #useless_files
 docs_ignore/
-start.bat 
+start.bat
+scratch/
+backend/scratch/
