@@ -82,9 +82,9 @@ logger = logging.getLogger(__name__)
 # Constants
 DEFAULT_BORDER: int = 4  # ISO/IEC 18004 specifies >= 4 modules quiet zone
 MAX_SAFE_QR_VERSION: int = 22  # Avoid unreadable dense matrices (> 105x105)
-VISUAL_MODULATION_DELTA: int = 28  # Safe pixel luminance modulation delta (legacy)
-DARK_MODULATION_DELTA: int = 45    # Optimized optical SNR for dark modules (immune to white blooming)
-LIGHT_MODULATION_DELTA: int = 28   # Fallback modulation delta for light modules
+VISUAL_MODULATION_DELTA: int = 45  # Boosted baseline luminance modulation delta
+DARK_MODULATION_DELTA: int = 50    # High-SNR optical modulation for dark modules (immune to white blooming)
+LIGHT_MODULATION_DELTA: int = 40   # Enhanced modulation delta for light modules
 RS_HEADER_ECC_BYTES: int = 8       # Parity bytes for 16B container header (corrects up to 4 byte errors)
 RS_BODY_ECC_BYTES: int = 24        # Parity bytes for payload body (corrects up to 12 byte errors)
 MAX_SAFE_STREAM_BYTES: int = 2_000  # Maximum safe secret text size in bytes
@@ -368,7 +368,7 @@ def _embed_visual_qr(
     rsc_body = RSCodec(RS_BODY_ECC_BYTES)
     hdr_fec = rsc_hdr.encode(header)
     body_fec = rsc_body.encode(body)
-    fec_stream = bytes(hdr_fec + body_fec)
+    fec_stream = bytes(hdr_fec) + bytes(body_fec)
 
     bits: List[int] = []
     for b in fec_stream:
@@ -548,6 +548,52 @@ def _count_all_white_neighbors(matrix: Sequence[Sequence[int]], r: int, c: int) 
     return wn
 
 
+def _clahe_numpy(gray: np.ndarray, tile_grid: int = 8, clip_limit: float = 2.5) -> np.ndarray:
+    """Pure-NumPy tile-based Contrast Limited Adaptive Histogram Equalization.
+
+    Divides the grayscale image into `tile_grid x tile_grid` tiles, equalises
+    each tile's histogram independently with contrast limit clipping and uniform
+    excess redistribution, and bilinearly interpolates between tile centroids to
+    prevent tile-boundary artifacts. Pure NumPy, zero external dependencies.
+    """
+    h, w = gray.shape
+    th, tw = h / tile_grid, w / tile_grid
+    luts = np.zeros((tile_grid, tile_grid, 256), dtype=np.uint8)
+    for tr in range(tile_grid):
+        for tc in range(tile_grid):
+            y0, y1 = int(round(tr * th)), int(round((tr + 1) * th))
+            x0, x1 = int(round(tc * tw)), int(round((tc + 1) * tw))
+            tile = gray[y0:y1, x0:x1].ravel()
+            hist, _ = np.histogram(tile, bins=256, range=(0, 256))
+            clip_val = max(1, int(clip_limit * tile.size / 256.0))
+            excess = np.sum(np.maximum(hist - clip_val, 0))
+            hist = np.minimum(hist, clip_val) + (excess // 256)
+            cdf = np.cumsum(hist)
+            cdf_min = cdf[cdf > 0][0] if np.any(cdf > 0) else 0
+            denom = max(1, cdf[-1] - cdf_min)
+            luts[tr, tc] = np.round(((cdf - cdf_min) / denom) * 255).astype(np.uint8)
+
+    cent_y = (np.arange(tile_grid) + 0.5) * th
+    cent_x = (np.arange(tile_grid) + 0.5) * tw
+    y_coords, x_coords = np.arange(h), np.arange(w)
+    tr0 = np.clip(np.floor((y_coords - cent_y[0]) / th).astype(int), 0, tile_grid - 2)
+    tc0 = np.clip(np.floor((x_coords - cent_x[0]) / tw).astype(int), 0, tile_grid - 2)
+    tr1, tc1 = tr0 + 1, tc0 + 1
+    wy = np.clip((y_coords - cent_y[tr0]) / th, 0.0, 1.0)[:, None]
+    wx = np.clip((x_coords - cent_x[tc0]) / tw, 0.0, 1.0)[None, :]
+    tr0_g, tr1_g = tr0[:, None], tr1[:, None]
+    tc0_g, tc1_g = tc0[None, :], tc1[None, :]
+
+    out_tl = luts[tr0_g, tc0_g, gray]
+    out_tr = luts[tr0_g, tc1_g, gray]
+    out_bl = luts[tr1_g, tc0_g, gray]
+    out_br = luts[tr1_g, tc1_g, gray]
+    top = (1.0 - wx) * out_tl + wx * out_tr
+    bottom = (1.0 - wx) * out_bl + wx * out_br
+    eq = (1.0 - wy) * top + wy * bottom
+    return np.clip(eq, 0, 255).astype(np.uint8)
+
+
 def _extract_visual_qr(
     img: Image.Image,
     position,
@@ -559,7 +605,7 @@ def _extract_visual_qr(
     """Extract hidden payload from the safe data modules of a rectified QR code."""
     # Calculate minimum possible QR version that can hold public_data
     try:
-        min_version = segno.make(public_data, error="m", boost_error=False).version
+        min_version = int(segno.make(public_data, error="m", boost_error=False).version)
     except Exception:
         min_version = 1
 
@@ -577,9 +623,249 @@ def _extract_visual_qr(
         return public_data, ""
 
     qr_size = get_qr_dimension(target_ver)
+
+    # ── Diagnostic Debug Dump (Enable via INVISIOVAULT_DEBUG_DUMP=true) ─────────
+    ENABLE_DEBUG_SCAN_DUMP = os.getenv("INVISIOVAULT_DEBUG_DUMP", "false").strip().lower() == "true"
+    debug_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "debug_scans")
+    scan_timestamp: Optional[str] = None
+
+    def _dump_debug_scan(img_or_arr: Any, suffix: str) -> None:
+        if not ENABLE_DEBUG_SCAN_DUMP or not scan_timestamp:
+            return
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+            dump_filename = f"scan_{scan_timestamp}_{suffix}.png"
+            dump_path = os.path.join(debug_dir, dump_filename)
+            arr = np.array(img_or_arr)
+            uint8_arr = np.clip(arr, 0, 255).astype(np.uint8)
+            Image.fromarray(uint8_arr).save(dump_path, format="PNG")
+            logger.info("[Diagnostic Dump] Saved %s to %s", suffix, dump_path)
+            print(f"[Diagnostic Dump] Saved {suffix} to: {dump_path}")
+        except Exception as dump_err:
+            logger.warning("[Diagnostic Dump] Failed to save %s: %s", suffix, dump_err)
+
+    if ENABLE_DEBUG_SCAN_DUMP:
+        from datetime import datetime
+        scan_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        _dump_debug_scan(rectified, "raw")
+
     qr_ref = segno.make(public_data, version=target_ver, error="m", boost_error=False)
     ref_matrix = qr_ref.matrix
     structural = get_structural_modules(target_ver)
+    safe_mods = get_safe_data_modules(target_ver)
+    seed_material = f"{public_data}|{target_ver}|{qr_size}".encode("utf-8")
+
+    dark_safe = [m for m in safe_mods if ref_matrix[m[0]][m[1]] == 1]
+    light_safe = [m for m in safe_mods if ref_matrix[m[0]][m[1]] == 0]
+
+    # Permutations for candidate decoding
+    # 1. Low-bleed ordered dark + light (2-Stage Reed-Solomon FEC format)
+    ordered_dark = _order_dark_modules(dark_safe, ref_matrix, seed_material)
+    seed_light = hashlib.sha256(seed_material + b"_light").digest()
+    perm_light = deterministic_permute(light_safe, seed_light)
+    permuted_mods_fec = ordered_dark + perm_light
+
+    # 2. Dark-priority hash permuted (non-FEC dark-priority format)
+    seed_dark = hashlib.sha256(seed_material + b"_dark").digest()
+    perm_dark = deterministic_permute(dark_safe, seed_dark)
+    permuted_mods_dark_priority = perm_dark + perm_light
+
+    # 3. Legacy uniform permutation (original format)
+    perm_seed_legacy = hashlib.sha256(seed_material).digest()
+    permuted_mods_legacy = deterministic_permute(safe_mods, perm_seed_legacy)
+
+    # ── PASS 1: Fast-Path Direct Extraction (<50ms) ─────────────────────────
+    # Before running heavy Lanczos upscaling, CLAHE, and 5x5 median filtering,
+    # attempt rapid bit extraction and Reed-Solomon header+body decoding directly
+    # on the raw rectified image using fast 3x3 mean/center sampling.
+    # Refinement: Explicitly compute raw_scale = rectified.size[0] // qr_size
+    # so it does not accidentally use the upscaled scale variable intended for Pass 2.
+    raw_rectified = rectified.copy()
+    raw_scale = max(1, rectified.size[0] // qr_size)
+
+    try:
+        raw_gray = np.array(raw_rectified.convert("L"), dtype=np.uint8)
+        raw_centers = (np.arange(qr_size) * raw_scale + (raw_scale // 2)).astype(int)
+
+        if raw_scale >= 3:
+            padded_raw = np.pad(raw_gray, pad_width=1, mode="edge")
+            raw_windows = np.lib.stride_tricks.sliding_window_view(padded_raw, (3, 3))
+            raw_module_samples = np.mean(
+                raw_windows[raw_centers[:, None], raw_centers[None, :]], axis=(-2, -1)
+            ).astype(np.float32)
+        else:
+            raw_module_samples = raw_gray[raw_centers[:, None], raw_centers[None, :]].astype(np.float32)
+
+        raw_struct_dark = [float(raw_module_samples[r, c]) for r, c in structural if ref_matrix[r][c] == 1]
+        raw_struct_light = [float(raw_module_samples[r, c]) for r, c in structural if ref_matrix[r][c] == 0]
+
+        if raw_struct_dark and raw_struct_light:
+            raw_dark_base = float(np.median(raw_struct_dark))
+            raw_light_base = float(np.median(raw_struct_light))
+            raw_contrast = raw_light_base - raw_dark_base
+
+            if raw_contrast > 20.0:
+                raw_eff_delta = DARK_MODULATION_DELTA * max(0.08, raw_contrast / 255.0)
+                raw_bleed = min(2.5, max(0.0, (raw_contrast / 255.0) * 2.5))
+
+                hdr_total_fec_bytes = 16 + RS_HEADER_ECC_BYTES
+                if len(permuted_mods_fec) >= hdr_total_fec_bytes * 8:
+                    rsc_hdr = RSCodec(RS_HEADER_ECC_BYTES)
+                    dec_hdr = None
+                    best_tf = None
+                    fec_mods = permuted_mods_fec[:hdr_total_fec_bytes * 8]
+                    f_rows = np.array([m[0] for m in fec_mods], dtype=np.intp)
+                    f_cols = np.array([m[1] for m in fec_mods], dtype=np.intp)
+                    f_is_dark = np.array([ref_matrix[r][c] == 1 for r, c in fec_mods], dtype=bool)
+                    f_base = np.where(f_is_dark, raw_dark_base, raw_light_base)
+                    f_eff_wn = np.array([_count_all_white_neighbors(ref_matrix, r, c) for r, c in fec_mods], dtype=np.float32)
+                    f_avgs = raw_module_samples[f_rows, f_cols]
+
+                    for tf in [0.50, 0.45, 0.55, 0.40, 0.60]:
+                        t_delta = max(6.0, raw_eff_delta * tf)
+                        t_dark = f_base + (f_eff_wn * raw_bleed) + t_delta
+                        t_light = f_base - ((5.6 - f_eff_wn) * raw_bleed * 0.5) - t_delta
+                        thresholds = np.where(f_is_dark, t_dark, t_light)
+                        cur_bits = np.where(f_is_dark, f_avgs > thresholds, f_avgs < thresholds).astype(int).tolist()
+
+                        raw_hdr_bytes = bytearray()
+                        for b_idx in range(0, len(cur_bits) - 7, 8):
+                            b_val = 0
+                            for bit_idx in range(8):
+                                b_val = (b_val << 1) | cur_bits[b_idx + bit_idx]
+                            raw_hdr_bytes.append(b_val)
+
+                        try:
+                            dec_hdr_res, _, _ = rsc_hdr.decode(bytes(raw_hdr_bytes))
+                            res_b = bytes(dec_hdr_res)
+                            if len(res_b) >= 16 and res_b[:4] == QR_CONTAINER_MAGIC:
+                                dec_hdr = res_b
+                                best_tf = tf
+                                break
+                        except ReedSolomonError:
+                            continue
+
+                    if dec_hdr is not None:
+                        magic, version, flags, orig_len, payload_len = struct.unpack(">4sBBII", dec_hdr[:14])
+                        is_encrypted = bool(flags & 0x01)
+                        if is_encrypted and not password:
+                            if debug_info is not None:
+                                debug_info["ivqrMagicDetected"] = True
+                                debug_info["fastPath"] = True
+                                debug_info["failureReason"] = "WRONG_PASSWORD"
+                            raise QRStegoError(
+                                "This QR code is password protected. Please provide the password.",
+                                error_code=QRErrorCode.WRONG_PASSWORD,
+                            )
+
+                        rsc_body = RSCodec(RS_BODY_ECC_BYTES)
+                        body_fec_len = len(rsc_body.encode(b"\x00" * payload_len))
+                        total_fec_bits = (hdr_total_fec_bytes + body_fec_len) * 8
+
+                        if total_fec_bits <= len(permuted_mods_fec):
+                            body_mods = permuted_mods_fec[hdr_total_fec_bytes * 8 : total_fec_bits]
+                            b_rows = np.array([m[0] for m in body_mods], dtype=np.intp)
+                            b_cols = np.array([m[1] for m in body_mods], dtype=np.intp)
+                            b_is_dark = np.array([ref_matrix[r][c] == 1 for r, c in body_mods], dtype=bool)
+                            b_base = np.where(b_is_dark, raw_dark_base, raw_light_base)
+                            b_eff_wn = np.array([_count_all_white_neighbors(ref_matrix, r, c) for r, c in body_mods], dtype=np.float32)
+                            b_avgs = raw_module_samples[b_rows, b_cols]
+
+                            dec_body = None
+                            candidate_b_tfs: List[float] = [best_tf] if best_tf is not None else []
+                            for tf_cand in [0.50, 0.55, 0.45, 0.60, 0.40, 0.35, 0.65]:
+                                if tf_cand not in candidate_b_tfs:
+                                    candidate_b_tfs.append(tf_cand)
+
+                            for b_tf in candidate_b_tfs:
+                                b_t_delta = max(6.0, raw_eff_delta * b_tf)
+                                b_t_dark = b_base + (b_eff_wn * raw_bleed) + b_t_delta
+                                b_t_light = b_base - ((5.6 - b_eff_wn) * raw_bleed * 0.5) - b_t_delta
+                                b_thresholds = np.where(b_is_dark, b_t_dark, b_t_light)
+                                cur_body_bits = np.where(b_is_dark, b_avgs > b_thresholds, b_avgs < b_thresholds).astype(int).tolist()
+
+                                raw_body_bytes = bytearray()
+                                for b_idx in range(0, len(cur_body_bits) - 7, 8):
+                                    b_val = 0
+                                    for bit_idx in range(8):
+                                        b_val = (b_val << 1) | cur_body_bits[b_idx + bit_idx]
+                                    raw_body_bytes.append(b_val)
+
+                                try:
+                                    dec_body_res, _, _ = rsc_body.decode(bytes(raw_body_bytes[:body_fec_len]))
+                                    dec_body = bytes(dec_body_res)
+                                    break
+                                except ReedSolomonError:
+                                    continue
+
+                            if dec_body is not None:
+                                container_bytes = dec_hdr[:16] + dec_body[:payload_len]
+                                secret_text = unpack_qr_container(container_bytes, password)
+                                if debug_info is not None:
+                                    debug_info["fastPath"] = True
+                                    debug_info["ivqrMagicDetected"] = True
+                                    debug_info["fecDecoded"] = True
+                                    debug_info["failureReason"] = None
+                                    debug_info["success"] = True
+                                logger.info("[Pass 1 Fast Path] Extraction succeeded directly on raw rectified image!")
+                                return public_data, secret_text
+    except QRStegoError:
+        raise
+    except Exception as p1_err:
+        logger.debug("[Pass 1 Fast Path] Did not resolve (%s); falling back to Pass 2 heavy recovery", p1_err)
+
+    # ── PASS 2: Heavy Deep Recovery (Adaptive Lanczos + CLAHE + 5x5 Median + K-Means) ──
+    # When rectified images are smaller than MIN_RECT_SIZE (e.g. from distant
+    # camera crops or low-version QRs), upscale using 3-lobed Lanczos sinc interpolation
+    # BEFORE CLAHE and 5x5 median filtering.
+    # Calculate current_scale first to prevent NameError, then derive target_scale.
+    MIN_RECT_SIZE = 400
+    rect_w, rect_h = rectified.size
+    current_scale = max(1, round(rect_w / float(qr_size)))
+
+    if rect_w < MIN_RECT_SIZE or rect_h < MIN_RECT_SIZE:
+        target_scale = max(current_scale, math.ceil(MIN_RECT_SIZE / float(qr_size)))
+        new_w = qr_size * target_scale
+        new_h = qr_size * target_scale
+        rectified = rectified.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        scale = target_scale
+        logger.debug(
+            "Adaptive LANCZOS upscale applied: %dx%d -> %dx%d (scale=%d, qr_size=%d)",
+            rect_w, rect_h, new_w, new_h, scale, qr_size,
+        )
+    else:
+        scale = current_scale
+
+    # ── CLAHE: adaptive tile-based illumination correction ────────────────────
+    # Only apply to low-contrast images (typically camera captures with uneven
+    # illumination, hot-spots, or screen glare).  High-quality generated QR
+    # images already have excellent contrast and must NOT be equalized, as
+    # CLAHE would redistribute the subtle 28-lx stego modulation and cause
+    # bit-flip errors.  Use the 5th/95th percentile range as a fast estimate.
+    CLAHE_CONTRAST_GATE = 80.0  # lx — skip CLAHE above this global contrast
+    try:
+        rect_arr = np.array(rectified.convert("L"), dtype=np.uint8)
+        p5, p95 = np.percentile(rect_arr, [5.0, 95.0])
+        global_contrast = float(p95 - p5)
+        if global_contrast < CLAHE_CONTRAST_GATE:
+            rect_eq = _clahe_numpy(rect_arr, tile_grid=8, clip_limit=2.5)
+            rectified = Image.fromarray(rect_eq, mode="L").convert("RGB")
+            logger.debug("CLAHE applied (global_contrast=%.1f < %.1f)", global_contrast, CLAHE_CONTRAST_GATE)
+        else:
+            logger.debug("CLAHE skipped (global_contrast=%.1f >= %.1f)", global_contrast, CLAHE_CONTRAST_GATE)
+    except Exception as _clahe_err:
+        logger.debug("CLAHE failed, using raw rectified image: %s", _clahe_err)
+
+    # Save processed diagnostic image (after upscale and CLAHE)
+    _dump_debug_scan(rectified, "processed")
+
+    # ── Vectorized 5x5 Median Sampling via sliding_window_view ──────────────
+    rect_gray = np.array(rectified.convert("L"), dtype=np.uint8)
+    padded_rect = np.pad(rect_gray, pad_width=2, mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(padded_rect, (5, 5))
+    centers = (np.arange(qr_size) * scale + (scale // 2)).astype(int)
+    sampled_windows = windows[centers[:, None], centers[None, :]]
+    module_medians = np.median(sampled_windows, axis=(-2, -1)).astype(np.float32)
 
     # Collect known unmodulated structural dark and light samples across the entire QR matrix
     struct_dark_pts: List[Tuple[int, int, float]] = []
@@ -588,17 +874,12 @@ def _extract_visual_qr(
     for r in range(qr_size):
         for c in range(qr_size):
             if (r, c) in structural:
-                samples = []
-                for dy in range(3, 7):
-                    for dx in range(3, 7):
-                        p = rectified.getpixel((c * scale + dx, r * scale + dy))
-                        samples.append(p[0] if isinstance(p, tuple) else p)
-                samples.sort()
-                avg = sum(samples[2:-2]) / (len(samples) - 4)
+                avg = float(module_medians[r, c])
                 if ref_matrix[r][c] == 1:
-                    struct_dark_pts.append((r, c, float(avg)))
+                    struct_dark_pts.append((r, c, avg))
                 else:
-                    struct_light_pts.append((r, c, float(avg)))
+                    struct_light_pts.append((r, c, avg))
+
 
     # Reject occluded structural points (e.g. from central logos or foreign watermarks)
     if struct_dark_pts and struct_light_pts:
@@ -628,7 +909,32 @@ def _extract_visual_qr(
     light_at_center = p_light[0] * center_r + p_light[1] * center_c + p_light[2]
     contrast = light_at_center - dark_at_center
 
-    effective_delta = DARK_MODULATION_DELTA * max(0.04, contrast / 255.0)
+    # ── Adaptive effective_delta ──────────────────────────────────────────────
+    # When global contrast is low (fog, glare, underexposure), the plane-fit
+    # baselines are unreliable and effective_delta collapses near zero, making
+    # the bit threshold indistinguishable from sensor noise.  In that regime,
+    # fall back to histogram-centroid estimation directly on the rectified image
+    # to obtain a more robust dark/light midpoint.
+    LOW_CONTRAST_THRESHOLD = 30.0
+    if contrast < LOW_CONTRAST_THRESHOLD and struct_dark_pts and struct_light_pts:
+        try:
+            rect_gray = np.array(rectified.convert("L"), dtype=np.float32)
+            dark_vals = np.array([v for _, _, v in struct_dark_pts], dtype=np.float32)
+            light_vals = np.array([v for _, _, v in struct_light_pts], dtype=np.float32)
+            # Robust centroid: trim the most extreme 10 % from each side
+            def _trimmed_mean(arr: np.ndarray, pct: float = 10.0) -> float:
+                lo, hi = np.percentile(arr, [pct, 100.0 - pct])
+                clipped = arr[(arr >= lo) & (arr <= hi)]
+                return float(clipped.mean()) if len(clipped) > 0 else float(arr.mean())
+            dark_at_center = _trimmed_mean(dark_vals)
+            light_at_center = _trimmed_mean(light_vals)
+            contrast = max(LOW_CONTRAST_THRESHOLD, light_at_center - dark_at_center)
+            if debug_info is not None:
+                debug_info["lowContrastFallback"] = True
+        except Exception:
+            pass  # keep original plane-fit values
+
+    effective_delta = DARK_MODULATION_DELTA * max(0.08, contrast / 255.0)
 
     if debug_info is not None:
         debug_info["clientVersion"] = client_version
@@ -638,30 +944,76 @@ def _extract_visual_qr(
         debug_info["darkBaseline"] = round(float(dark_at_center), 2)
         debug_info["lightBaseline"] = round(float(light_at_center), 2)
         debug_info["effectiveDelta"] = round(float(effective_delta), 2)
-
-    safe_mods = get_safe_data_modules(target_ver)
-    seed_material = f"{public_data}|{target_ver}|{qr_size}".encode("utf-8")
-
-    dark_safe = [m for m in safe_mods if ref_matrix[m[0]][m[1]] == 1]
-    light_safe = [m for m in safe_mods if ref_matrix[m[0]][m[1]] == 0]
-
-    # Permutations for candidate decoding
-    # 1. Low-bleed ordered dark + light (2-Stage Reed-Solomon FEC format)
-    ordered_dark = _order_dark_modules(dark_safe, ref_matrix, seed_material)
-    seed_light = hashlib.sha256(seed_material + b"_light").digest()
-    perm_light = deterministic_permute(light_safe, seed_light)
-    permuted_mods_fec = ordered_dark + perm_light
-
-    # 2. Dark-priority hash permuted (non-FEC dark-priority format)
-    seed_dark = hashlib.sha256(seed_material + b"_dark").digest()
-    perm_dark = deterministic_permute(dark_safe, seed_dark)
-    permuted_mods_dark_priority = perm_dark + perm_light
-
-    # 3. Legacy uniform permutation (original format)
-    perm_seed_legacy = hashlib.sha256(seed_material).digest()
-    permuted_mods_legacy = deterministic_permute(safe_mods, perm_seed_legacy)
-
     bleed_factor = min(2.5, max(0.0, (contrast / 255.0) * 2.5))
+
+    # ── K-Means Centroid Estimation on Sampled Dark Module Medians ──────────────
+    # Under Nearest-Neighbor upscaling and 1080p streams, sensor noise is preserved
+    # as discrete step functions. Non-linear camera ISP tone curves and gamma compression
+    # cause the observed modulation delta to diverge from global contrast.
+    # We estimate empirical centroids using 1D 2-means clustering on the candidate dark
+    # module residuals against the unmodulated structural dark modules (ground truth).
+    kmeans_anchor_tf = 0.50
+    kmeans_c0_offset = 0.0
+    if ordered_dark and struct_dark_pts:
+        try:
+            # 1. Structural dark modules are 100% unmodulated (ground truth cluster 0)
+            struct_res: List[float] = []
+            for sr, sc, s_avg in struct_dark_pts:
+                s_base = p_dark[0] * sr + p_dark[1] * sc + p_dark[2]
+                s_eff_wn = _count_all_white_neighbors(ref_matrix, sr, sc)
+                struct_res.append(s_avg - (s_base + s_eff_wn * bleed_factor))
+
+            c0_init = float(np.median(struct_res)) if struct_res else 0.0
+
+            # 2. Candidate dark data modules (mixture of bit 0 and bit 1)
+            dark_sample_mods = ordered_dark[:min(256, len(ordered_dark))]
+            data_res = np.array([
+                float(module_medians[dr, dc]) - (
+                    p_dark[0] * dr + p_dark[1] * dc + p_dark[2] +
+                    _count_all_white_neighbors(ref_matrix, dr, dc) * bleed_factor
+                )
+                for dr, dc in dark_sample_mods
+            ], dtype=np.float32)
+
+            if len(data_res) >= 16:
+                # Initialize c1 from upper quartile or initial effective_delta
+                c1_init = max(c0_init + 12.0, float(np.percentile(data_res, 75)))
+                c0, c1 = c0_init, c1_init
+
+                # 1D 2-means clustering with L1 (median) updates for outlier robustness
+                for _ in range(10):
+                    dist0 = np.abs(data_res - c0)
+                    dist1 = np.abs(data_res - c1)
+                    m1 = dist1 < dist0
+                    m0 = ~m1
+                    if np.sum(m0) >= 3 and np.sum(m1) >= 3:
+                        new_c0 = float(np.median(data_res[m0]))
+                        new_c1 = float(np.median(data_res[m1]))
+                        if abs(new_c0 - c0) < 0.1 and abs(new_c1 - c1) < 0.1:
+                            c0, c1 = new_c0, new_c1
+                            break
+                        c0, c1 = new_c0, new_c1
+                    else:
+                        break
+
+                delta_kmeans = c1 - c0
+                # A true steganographic signal produces a distinct bimodal separation (delta >= 10 lx)
+                if delta_kmeans >= 10.0 and c1 > c0:
+                    # Anchor effective_delta directly to empirical cluster distance
+                    effective_delta = float(np.clip(delta_kmeans, 12.0, 65.0))
+                    # Midpoint decision boundary between the two empirical cluster centroids
+                    kmeans_c0_offset = float(c0)
+                    kmeans_anchor_tf = 0.50
+                    if debug_info is not None:
+                        debug_info["kmeansCentroids"] = (round(c0, 2), round(c1, 2))
+                        debug_info["kmeansC0Offset"] = round(kmeans_c0_offset, 2)
+                        debug_info["kmeansDelta"] = round(delta_kmeans, 2)
+                        debug_info["kmeansAnchorTf"] = round(kmeans_anchor_tf, 2)
+                        debug_info["effectiveDelta"] = round(effective_delta, 2)
+        except Exception as km_err:
+            logger.debug("K-Means centroid estimation fallback: %s", km_err)
+
+    _anchor_tf: float = round(kmeans_anchor_tf, 2)
 
     def _sample_module_bit(r: int, c: int, thresh_factor: float = 0.60) -> int:
         is_dark = (ref_matrix[r][c] == 1)
@@ -673,25 +1025,40 @@ def _extract_visual_qr(
         eff_wn = _count_all_white_neighbors(ref_matrix, r, c)
         thresh_delta = max(6.0, effective_delta * thresh_factor)
         if is_dark:
-            thresh = base_val + (eff_wn * bleed_factor) + thresh_delta
+            thresh = base_val + (eff_wn * bleed_factor) + kmeans_c0_offset + thresh_delta
         else:
             eff_dn = 5.6 - eff_wn
             thresh = base_val - (eff_dn * bleed_factor * 0.5) - thresh_delta
 
-        samples = []
-        for dy in range(4, 7):
-            for dx in range(4, 7):
-                px = rectified.getpixel((c * scale + dx, r * scale + dy))
-                luma = px[0] if isinstance(px, tuple) else px
-                samples.append(luma)
-        # Trimmed mean (discard 1 lowest and 1 highest out of 9 samples)
-        samples.sort()
-        avg = sum(samples[1:-1]) / (len(samples) - 2) if len(samples) > 2 else sum(samples) / len(samples)
-
+        avg = float(module_medians[r, c])
         if is_dark:
             return 1 if avg > thresh else 0
         else:
             return 1 if avg < thresh else 0
+
+    def _sample_bits(module_list: Sequence[Tuple[int, int]], thresh_factor: float) -> List[int]:
+        if not module_list:
+            return []
+        rows = np.array([m[0] for m in module_list], dtype=np.intp)
+        cols = np.array([m[1] for m in module_list], dtype=np.intp)
+        is_dark = np.array([ref_matrix[r][c] == 1 for r, c in module_list], dtype=bool)
+
+        base_vals = np.where(
+            is_dark,
+            p_dark[0] * rows + p_dark[1] * cols + p_dark[2],
+            p_light[0] * rows + p_light[1] * cols + p_light[2],
+        )
+        eff_wn = np.array([_count_all_white_neighbors(ref_matrix, r, c) for r, c in module_list], dtype=np.float32)
+        thresh_delta = max(6.0, effective_delta * thresh_factor)
+
+        thresh_dark = base_vals + (eff_wn * bleed_factor) + kmeans_c0_offset + thresh_delta
+        eff_dn = 5.6 - eff_wn
+        thresh_light = base_vals - (eff_dn * bleed_factor * 0.5) - thresh_delta
+        thresholds = np.where(is_dark, thresh_dark, thresh_light)
+
+        avgs = module_medians[rows, cols]
+        bits = np.where(is_dark, avgs > thresholds, avgs < thresholds).astype(int)
+        return bits.tolist()
 
     scan_id = debug_info.get("cameraScanId") if debug_info else None
     debug_capture_enabled = os.getenv("DEBUG_CAMERA_CAPTURE", "false").strip().lower() == "true"
@@ -739,12 +1106,18 @@ def _extract_visual_qr(
         best_tf = None
         fec_hdr_bits: List[int] = []
 
-        candidate_tfs = [0.60, 0.58, 0.62, 0.55, 0.52, 0.65, 0.50, 0.45, 0.40, 0.35, 0.30, 0.25]
+        # ── Guided threshold sweep ──────────────────────────────────────────
+        # Anchor the sweep on the empirical K-Means cluster midpoint (or dark/light midpoint)
+        # and sweep ±0.15 in fine 0.01 steps.
+        _anchor_tf = round(kmeans_anchor_tf, 2)
+        _guided = [round(_anchor_tf + i * 0.01, 2) for i in range(-15, 16)]
+        _guided = [t for t in _guided if 0.12 <= t <= 0.88]
+        _coarse = [0.50, 0.55, 0.60, 0.45, 0.40, 0.35, 0.30, 0.25, 0.65, 0.70, 0.75, 0.80]
+        candidate_tfs = list(dict.fromkeys(
+            [_anchor_tf] + _guided + _coarse
+        ))
         for tf in candidate_tfs:
-            cur_hdr_bits = [
-                _sample_module_bit(r, c, thresh_factor=tf)
-                for r, c in permuted_mods_fec[:hdr_total_fec_bytes * 8]
-            ]
+            cur_hdr_bits = _sample_bits(permuted_mods_fec[:hdr_total_fec_bytes * 8], thresh_factor=tf)
             raw_hdr_fec_bytes = bytearray()
             for b_idx in range(0, len(cur_hdr_bits) - 7, 8):
                 byte_val = 0
@@ -783,28 +1156,24 @@ def _extract_visual_qr(
             total_fec_bits = (hdr_total_fec_bytes + body_fec_len) * 8
 
             if total_fec_bits <= len(permuted_mods_fec):
-                body_candidate_tfs = [best_tf] + [
-                    round(t, 2) for t in [
-                        # Fine-grained steps around the header's best threshold
-                        best_tf - 0.01, best_tf + 0.01,
-                        best_tf - 0.02, best_tf + 0.02,
-                        best_tf - 0.03, best_tf + 0.03,
-                        best_tf - 0.05, best_tf + 0.05,
-                        best_tf - 0.10, best_tf + 0.10,
-                        # Global coarse sweep for heavily-distorted frames
-                        0.60, 0.58, 0.62, 0.55, 0.52, 0.65, 0.50,
-                        0.45, 0.40, 0.35, 0.30, 0.25, 0.70, 0.75,
+                _adaptive = (
+                    [
+                        round(best_tf + i * 0.01, 2)
+                        for i in range(-15, 16)
+                        if 0.12 <= best_tf + i * 0.01 <= 0.88
                     ]
-                    if round(t, 2) != round(best_tf, 2) and 0.15 <= t <= 0.85
-                ]
+                    if best_tf is not None
+                    else []
+                )
+                _coarse = [0.60, 0.58, 0.62, 0.55, 0.52, 0.65, 0.50,
+                           0.45, 0.40, 0.35, 0.30, 0.25, 0.22, 0.20, 0.18, 0.15,
+                           0.70, 0.75, 0.80]
+                body_candidate_tfs = list(dict.fromkeys(_adaptive + _coarse))
                 dec_body = None
                 fec_body_bits: List[int] = []
 
                 for b_tf in body_candidate_tfs:
-                    cur_body_bits = [
-                        _sample_module_bit(r, c, thresh_factor=b_tf)
-                        for r, c in permuted_mods_fec[hdr_total_fec_bytes * 8 : total_fec_bits]
-                    ]
+                    cur_body_bits = _sample_bits(permuted_mods_fec[hdr_total_fec_bytes * 8 : total_fec_bits], thresh_factor=b_tf)
                     raw_body_fec_bytes = bytearray()
                     for b_idx in range(0, len(cur_body_bits) - 7, 8):
                         byte_val = 0
@@ -855,7 +1224,7 @@ def _extract_visual_qr(
     header_bits: List[int] = []
     for idx in range(min(128, len(permuted_mods_dark_priority))):
         r, c = permuted_mods_dark_priority[idx]
-        header_bits.append(_sample_module_bit(r, c))
+        header_bits.append(_sample_module_bit(r, c, thresh_factor=_anchor_tf))
 
     header_bytes = bytearray()
     for b_idx in range(0, len(header_bits) - 7, 8):
@@ -872,7 +1241,7 @@ def _extract_visual_qr(
         legacy_header_bits: List[int] = []
         for idx in range(min(128, len(permuted_mods_legacy))):
             r, c = permuted_mods_legacy[idx]
-            legacy_header_bits.append(_sample_module_bit(r, c))
+            legacy_header_bits.append(_sample_module_bit(r, c, thresh_factor=_anchor_tf))
 
         legacy_header_bytes = bytearray()
         for b_idx in range(0, len(legacy_header_bits) - 7, 8):
@@ -916,7 +1285,7 @@ def _extract_visual_qr(
     all_bits = list(header_bits)
     for idx in range(len(header_bits), total_bits):
         r, c = chosen_permuted_mods[idx]
-        all_bits.append(_sample_module_bit(r, c))
+        all_bits.append(_sample_module_bit(r, c, thresh_factor=_anchor_tf))
 
     container_bytes = bytearray()
     for b_idx in range(0, len(all_bits) - 7, 8):
@@ -973,7 +1342,7 @@ def _embed_stream_qr(
             error_code=QRErrorCode.CAPACITY_EXCEEDED,
         ) from exc
 
-    if qr.version > MAX_SAFE_QR_VERSION:
+    if int(qr.version) > MAX_SAFE_QR_VERSION:
         raise QRStegoError(
             f"Hidden payload exceeds safe QR capacity (requires version {qr.version}, "
             f"maximum safe version is {MAX_SAFE_QR_VERSION}).",
@@ -1040,7 +1409,7 @@ def generate_qr_with_stego(
         raise QRStegoError("Secret text is required.", error_code=QRErrorCode.QR_INVALID)
 
     # Normalize scale
-    scale = max(5, min(30, int(scale)))
+    scale = max(5, min(30, scale))
 
     # Determine embedding strategy
     chosen_method = method.lower()
@@ -1144,13 +1513,14 @@ def extract_from_qr_stego(
             img_source = qr_path
 
         with Image.open(img_source) as raw_img:
-            if raw_img.mode in ("RGBA", "LA") or (raw_img.mode == "P" and "transparency" in raw_img.info):
-                rgba_img = raw_img.convert("RGBA")
-                white_bg = Image.new("RGBA", rgba_img.size, (255, 255, 255, 255))
-                white_bg.paste(rgba_img, mask=rgba_img.split()[3])
-                img = white_bg.convert("RGB")
+            img = raw_img.copy()
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGBA")
+                background = Image.new("RGBA", img.size, (255, 255, 255, 255))
+                background.paste(img, mask=img.split()[3])
+                img = background.convert("L")
             else:
-                img = raw_img.convert("RGB")
+                img = img.convert("L")
 
         parsed_client_pos = _parse_client_corners(client_corners)
 
@@ -1209,12 +1579,11 @@ def extract_from_qr_stego(
         # Priority 2: Server-side detection via zxing-cpp
         decoded_objects = []
         try:
-            decoded_objects = zxingcpp.read_barcodes(
-                img,
-                try_rotate=True,
-                try_downscale=True,
-                binarizer=zxingcpp.Binarizer.LocalAverage,
-            )
+            read_kwargs: Dict[str, Any] = {"try_rotate": True, "try_downscale": True}
+            binarizer_cls = getattr(zxingcpp, "Binarizer", None)
+            if binarizer_cls is not None and hasattr(binarizer_cls, "LocalAverage"):
+                read_kwargs["binarizer"] = binarizer_cls.LocalAverage
+            decoded_objects = zxingcpp.read_barcodes(img, **read_kwargs)
         except Exception as exc:
             logger.debug("zxingcpp read failed: %s, falling back to pyzbar", exc)
 
@@ -1222,8 +1591,8 @@ def extract_from_qr_stego(
         qr_text = ""
 
         if decoded_objects:
-            qr_text = decoded_objects[0].text
-            position = decoded_objects[0].position
+            qr_text = getattr(decoded_objects[0], "text", "")
+            position = getattr(decoded_objects[0], "position", None)
             if debug_info is not None and not client_attempted:
                 debug_info["geometrySource"] = "server_zxing"
         else:

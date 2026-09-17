@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import math
 import struct
-from typing import List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 from PIL import Image
@@ -103,7 +103,7 @@ def get_structural_modules(version: int) -> Set[Tuple[int, int]]:
     # 6. Center reservation (protects center area up to 15% width from data modulation,
     # ensuring that centered logos do not overwrite or corrupt steganographic bits)
     center = size // 2
-    logo_mod_radius = int(math.ceil((size + 8) * 0.15 / 2)) + 1
+    logo_mod_radius = math.ceil((size + 8) * 0.15 / 2) + 1
     for r in range(max(0, center - logo_mod_radius), min(size, center + logo_mod_radius + 1)):
         for c in range(max(0, center - logo_mod_radius), min(size, center + logo_mod_radius + 1)):
             structural.add((r, c))
@@ -152,6 +152,16 @@ def deterministic_permute(items: list, seed: bytes) -> list:
     return result
 
 
+def _get_pixel_luma(img: Image.Image, x: int, y: int) -> float:
+    """Safely sample pixel luminance from image, handling tuple, scalar, and None."""
+    px = img.getpixel((x, y))
+    if isinstance(px, tuple):
+        return float(px[0])
+    if px is not None:
+        return float(px)
+    return 0.0
+
+
 def verify_finder_pattern(
     rect: Image.Image,
     r0: int,
@@ -165,24 +175,29 @@ def verify_finder_pattern(
         (is_valid, threshold) where threshold is the estimated dark/light midpoint.
     """
     # Center 3x3 must be dark: (r0+2..r0+4, c0+2..c0+4)
-    center_samples: List[int] = []
+    center_samples: List[float] = []
     for dr in range(2, 5):
         for dc in range(2, 5):
-            px = rect.getpixel(((c0 + dc) * scale + scale // 2, (r0 + dr) * scale + scale // 2))
-            center_samples.append(px[0] if isinstance(px, tuple) else px)
+            center_samples.append(
+                _get_pixel_luma(rect, (c0 + dc) * scale + scale // 2, (r0 + dr) * scale + scale // 2)
+            )
 
     # Ring around center must be light: (r0+1, c0+1..5), (r0+5, c0+1..5) and vertical edges
-    ring_samples: List[int] = []
+    ring_samples: List[float] = []
     for dc in range(1, 6):
-        px1 = rect.getpixel(((c0 + dc) * scale + scale // 2, (r0 + 1) * scale + scale // 2))
-        px2 = rect.getpixel(((c0 + dc) * scale + scale // 2, (r0 + 5) * scale + scale // 2))
-        ring_samples.append(px1[0] if isinstance(px1, tuple) else px1)
-        ring_samples.append(px2[0] if isinstance(px2, tuple) else px2)
+        ring_samples.append(
+            _get_pixel_luma(rect, (c0 + dc) * scale + scale // 2, (r0 + 1) * scale + scale // 2)
+        )
+        ring_samples.append(
+            _get_pixel_luma(rect, (c0 + dc) * scale + scale // 2, (r0 + 5) * scale + scale // 2)
+        )
     for dr in range(2, 5):
-        px1 = rect.getpixel(((c0 + 1) * scale + scale // 2, (r0 + dr) * scale + scale // 2))
-        px2 = rect.getpixel(((c0 + 5) * scale + scale // 2, (r0 + dr) * scale + scale // 2))
-        ring_samples.append(px1[0] if isinstance(px1, tuple) else px1)
-        ring_samples.append(px2[0] if isinstance(px2, tuple) else px2)
+        ring_samples.append(
+            _get_pixel_luma(rect, (c0 + 1) * scale + scale // 2, (r0 + dr) * scale + scale // 2)
+        )
+        ring_samples.append(
+            _get_pixel_luma(rect, (c0 + 5) * scale + scale // 2, (r0 + dr) * scale + scale // 2)
+        )
 
     avg_center = sum(center_samples) / len(center_samples)
     avg_ring = sum(ring_samples) / len(ring_samples)
@@ -265,12 +280,6 @@ def detect_qr_version_from_timing(
     Returns:
         (best_version, rectified_image) or (None, None) if unresolved.
     """
-    has_pattern_centers = (
-        hasattr(position, "top_left_finder") and position.top_left_finder is not None
-        and hasattr(position, "bottom_left_finder") and position.bottom_left_finder is not None
-        and hasattr(position, "top_right_finder") and position.top_right_finder is not None
-    )
-
     src_pts_outer = [
         (float(position.top_left.x), float(position.top_left.y)),
         (float(position.bottom_left.x), float(position.bottom_left.y)),
@@ -294,20 +303,26 @@ def detect_qr_version_from_timing(
         size = get_qr_dimension(ver)
         rect_dim = size * scale
 
+        tl_f = getattr(position, "top_left_finder", None)
+        bl_f = getattr(position, "bottom_left_finder", None)
+        br_a = getattr(position, "bottom_right_alignment", None)
+        tr_f = getattr(position, "top_right_finder", None)
+
         use_patterns = (
-            has_pattern_centers
-            and ver >= 2
-            and hasattr(position, "bottom_right_alignment")
-            and position.bottom_right_alignment is not None
+            ver >= 2
+            and tl_f is not None
+            and bl_f is not None
+            and br_a is not None
+            and tr_f is not None
         )
 
-        if use_patterns:
+        if use_patterns and tl_f is not None and bl_f is not None and br_a is not None and tr_f is not None:
             align_pos = consts.ALIGNMENT_POS[ver - 2][-1]
             src_pts = [
-                (float(position.top_left_finder.x), float(position.top_left_finder.y)),
-                (float(position.bottom_left_finder.x), float(position.bottom_left_finder.y)),
-                (float(position.bottom_right_alignment.x), float(position.bottom_right_alignment.y)),
-                (float(position.top_right_finder.x), float(position.top_right_finder.y)),
+                (float(tl_f.x), float(tl_f.y)),
+                (float(bl_f.x), float(bl_f.y)),
+                (float(br_a.x), float(br_a.y)),
+                (float(tr_f.x), float(tr_f.y)),
             ]
             dst_pts = [
                 (3.5 * scale, 3.5 * scale),
@@ -325,12 +340,21 @@ def detect_qr_version_from_timing(
             ]
 
         coeffs = find_perspective_coeffs(src_pts, dst_pts)
-        rect = img.transform(
-            (rect_dim, rect_dim),
-            Image.Transform.PERSPECTIVE,
-            coeffs,
-            Image.Resampling.BICUBIC,
-        )
+        try:
+            rect = img.transform(
+                (rect_dim, rect_dim),
+                Image.Transform.PERSPECTIVE,
+                coeffs.tolist(),  # PIL expects Sequence, not ndarray
+                Image.Resampling.LANCZOS,
+            )
+        except ValueError:
+            # Pillow's C engine only permits NEAREST (0), BILINEAR (2), or BICUBIC (3) for PERSPECTIVE transform.
+            rect = img.transform(
+                (rect_dim, rect_dim),
+                Image.Transform.PERSPECTIVE,
+                coeffs.tolist(),
+                Image.Resampling.BICUBIC,
+            )
 
         # 1. Structural Finder Pattern Verification:
         # Top-right finder is at (0, size - 7); Bottom-left finder is at (size - 7, 0)
@@ -343,7 +367,7 @@ def detect_qr_version_from_timing(
         if not ok_bl and not is_hint:
             continue
 
-        timing_threshold = (th_tr + th_bl) / 2.0
+        timing_threshold: float = (th_tr + th_bl) / 2.0
         if is_hint and best_rect is None:
             best_ver = ver
             best_rect = rect
@@ -358,16 +382,14 @@ def detect_qr_version_from_timing(
 
         for c in range(8, size - 8):
             expected = 1 if (c % 2 == 0) else 0
-            px_val = rect.getpixel((c * scale + scale // 2, 6 * scale + scale // 2))
-            luma = px_val[0] if isinstance(px_val, tuple) else px_val
+            luma = _get_pixel_luma(rect, c * scale + scale // 2, 6 * scale + scale // 2)
             detected = 1 if luma < timing_threshold else 0
             if detected == expected:
                 correct += 1
 
         for r in range(8, size - 8):
             expected = 1 if (r % 2 == 0) else 0
-            px_val = rect.getpixel((6 * scale + scale // 2, r * scale + scale // 2))
-            luma = px_val[0] if isinstance(px_val, tuple) else px_val
+            luma = _get_pixel_luma(rect, 6 * scale + scale // 2, r * scale + scale // 2)
             detected = 1 if luma < timing_threshold else 0
             if detected == expected:
                 correct += 1

@@ -41,6 +41,7 @@ import sys
 import tempfile
 import unittest
 from io import BytesIO
+from typing import Any
 
 # Ensure backend directory is in sys.path
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -110,7 +111,7 @@ class CameraScanPipelineTests(unittest.TestCase):
         warped_img = grid_img.transform(
             (width, height),
             Image.Transform.PERSPECTIVE,
-            forward_coeffs,
+            forward_coeffs.tolist(),
             resample=Image.Resampling.BICUBIC,
             fillcolor=255
         )
@@ -120,7 +121,7 @@ class CameraScanPipelineTests(unittest.TestCase):
         rectified_img = warped_img.transform(
             (width, height),
             Image.Transform.PERSPECTIVE,
-            unwarp_coeffs,
+            unwarp_coeffs.tolist(),
             resample=Image.Resampling.BICUBIC,
             fillcolor=255
         )
@@ -185,7 +186,7 @@ class CameraScanPipelineTests(unittest.TestCase):
         img = Image.open(qr_path)
         zx_res = zxingcpp.read_barcode(img)
         self.assertIsNotNone(zx_res)
-        pos = zx_res.position
+        pos: Any = getattr(zx_res, "position")
 
         # Format corners matching browser jsQR output format
         client_corners = {
@@ -253,7 +254,7 @@ class CameraScanPipelineTests(unittest.TestCase):
         warped_img = frame_canvas.transform(
             (frame_w, frame_h),
             Image.Transform.PERSPECTIVE,
-            coeffs,
+            coeffs.tolist(),
             resample=Image.Resampling.BICUBIC,
             fillcolor=230
         )
@@ -326,7 +327,8 @@ class CameraScanPipelineTests(unittest.TestCase):
         # Path 2: Camera scan with client corners provided
         img = Image.open(qr_path)
         zx_res = zxingcpp.read_barcode(img)
-        pos = zx_res.position
+        self.assertIsNotNone(zx_res)
+        pos: Any = getattr(zx_res, "position")
         corners = {
             "topLeftCorner": {"x": float(pos.top_left.x), "y": float(pos.top_left.y)},
             "topRightCorner": {"x": float(pos.top_right.x), "y": float(pos.top_right.y)},
@@ -358,7 +360,8 @@ class CameraScanPipelineTests(unittest.TestCase):
 
         img = Image.open(qr_path)
         zx_res = zxingcpp.read_barcode(img)
-        pos = zx_res.position
+        self.assertIsNotNone(zx_res)
+        pos: Any = getattr(zx_res, "position")
         corners = {
             "topLeftCorner": {"x": float(pos.top_left.x), "y": float(pos.top_left.y)},
             "topRightCorner": {"x": float(pos.top_right.x), "y": float(pos.top_right.y)},
@@ -400,6 +403,99 @@ class CameraScanPipelineTests(unittest.TestCase):
         self.assertEqual(resp_json["publicData"], self.public_url)
         self.assertEqual(resp_json["secretData"], self.secret_msg)
 
+    def test_j_distant_small_crop_adaptive_upscaling_recovery(self):
+        """Test J: Distant small crop (~200px) recovered via adaptive LANCZOS upscaling."""
+        qr_path = os.path.join(self.temp_dir, "test_distant_small_orig.png")
+        generate_qr_with_stego(
+            public_data=self.public_url,
+            secret_text="DistantArmLengthSecret2026",
+            output_path=qr_path,
+            password=None,
+            method="visual",
+            scale=7,  # Small scale yielding a 203x203 QR matrix (distant camera simulation)
+        )
+
+        orig_img = Image.open(qr_path).convert("L")
+        ow, oh = orig_img.size
+
+        # Place onto canvas with small background padding
+        pad = 20
+        frame_w, frame_h = ow + 2 * pad, oh + 2 * pad
+        frame_canvas = Image.new("L", (frame_w, frame_h), 240)
+        frame_canvas.paste(orig_img, (pad, pad))
+
+        # Mild perspective warp (handheld phone tilt)
+        src_corners = [
+            (pad + 4.0, pad + 6.0),
+            (pad - 3.0, pad + oh + 3.0),
+            (pad + ow + 5.0, pad + oh - 4.0),
+            (pad + ow - 4.0, pad + 3.0),
+        ]
+        dst_corners = [
+            (pad, pad),
+            (pad, pad + oh),
+            (pad + ow, pad + oh),
+            (pad + ow, pad),
+        ]
+        coeffs = find_perspective_coeffs(src_corners, dst_corners)
+        warped_img = frame_canvas.transform(
+            (frame_w, frame_h),
+            Image.Transform.PERSPECTIVE,
+            coeffs.tolist(),
+            resample=Image.Resampling.BICUBIC,
+            fillcolor=240,
+        )
+
+        distant_frame_path = os.path.join(self.temp_dir, "test_distant_small_frame.png")
+        warped_img.save(distant_frame_path)
+
+        # Extract through pipeline: verifies adaptive LANCZOS upscale kicks in and recovers secret
+        pub, sec = extract_from_qr_stego(distant_frame_path, password=None)
+        self.assertEqual(pub, self.public_url)
+        self.assertEqual(sec, "DistantArmLengthSecret2026")
+
+    def test_k_nearest_neighbor_upscale_with_moire_ripple_recovery(self):
+        """Test K: Verify Nearest-Neighbor upscaled crop with screen Moiré OLPF filter decodes cleanly."""
+        qr_path = os.path.join(self.temp_dir, "test_nn_moire_orig.png")
+        secret = "NuclearNearestNeighborFix2026!"
+        generate_qr_with_stego(
+            public_data=self.public_url,
+            secret_text=secret,
+            output_path=qr_path,
+            password=None,
+            method="visual",
+            scale=8,
+        )
+
+        orig_img = Image.open(qr_path).convert("L")
+        ow, oh = orig_img.size
+
+        # 1. Simulate distant camera crop (sensor crop of 240x240)
+        downscaled = orig_img.resize((240, 240), Image.Resampling.BILINEAR)
+
+        # 2. Add high-frequency screen subpixel Moiré ripples
+        down_arr = np.array(downscaled, dtype=np.float32)
+        dh, dw = down_arr.shape
+        yy, xx = np.indices((dh, dw))
+        moire_pattern = 12.0 * np.sin(0.45 * xx) * np.cos(0.45 * yy)
+        noisy_arr = np.clip(down_arr + moire_pattern, 0, 255).astype(np.uint8)
+        noisy_img = Image.fromarray(noisy_arr, mode="L")
+
+        # 3. Simulate Frontend Optical Low-Pass Filter (OLPF) to kill Moiré
+        olpf_img = noisy_img.filter(ImageFilter.GaussianBlur(radius=1.0))
+
+        # 4. Simulate Frontend Nearest-Neighbor Upscale to MIN_OUTPUT_SIZE (480x480)
+        nn_upscaled = olpf_img.resize((480, 480), Image.Resampling.NEAREST)
+
+        test_path = os.path.join(self.temp_dir, "test_nn_moire_processed.png")
+        nn_upscaled.save(test_path)
+
+        # 5. Extract: Verifies Nearest-Neighbor preservation + K-Means centroid recovery
+        pub, sec = extract_from_qr_stego(test_path, password=None)
+        self.assertEqual(pub, self.public_url)
+        self.assertEqual(sec, secret)
+
 
 if __name__ == "__main__":
     unittest.main()
+

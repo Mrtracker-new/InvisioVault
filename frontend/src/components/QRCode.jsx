@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { QrCode, Sparkles, ScanLine, Sliders, Lock, AlertTriangle, ShieldCheck, ShieldAlert, ShieldX, CheckCircle2, Download, Smartphone, Camera, Upload, RotateCcw, AlertCircle, Globe, Check, Copy, Info, Eye, EyeOff } from 'lucide-react'
+import { QrCode, Sparkles, ScanLine, Sliders, Lock, AlertTriangle, ShieldCheck, ShieldAlert, ShieldX, CheckCircle2, Download, Smartphone, Camera, Upload, RotateCcw, AlertCircle, Globe, Check, Copy, Info, Eye, EyeOff, Zap } from 'lucide-react'
 import axios from 'axios'
 import './QRCode.css'
 import API_URL from '../config/api'
@@ -25,6 +25,64 @@ const QR_EXTRACT_STEPS = [
 function QRCode() {
     const [activeTab, setActiveTab] = useState('generate') // 'generate' or 'extract'
     const [scanMode, setScanMode] = useState('upload') // 'upload' (recommended for visual stego) or 'camera'
+
+    // Web Audio API Context (instantiated and resumed during user gesture to satisfy iOS Safari)
+    const audioCtxRef = useRef(null)
+
+    const initAudioContext = () => {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext
+            if (!AudioCtx) return null
+            if (!audioCtxRef.current) {
+                audioCtxRef.current = new AudioCtx()
+            }
+            if (audioCtxRef.current.state === 'suspended') {
+                audioCtxRef.current.resume()
+            }
+            return audioCtxRef.current
+        } catch (e) {
+            console.debug('[Audio] Web Audio init error:', e)
+            return null
+        }
+    }
+
+    const playSuccessChime = () => {
+        try {
+            const ctx = audioCtxRef.current || initAudioContext()
+            if (!ctx) return
+            if (ctx.state === 'suspended') {
+                ctx.resume()
+            }
+            const now = ctx.currentTime
+            // Two-tone harmonic chime: 880 Hz (A5) -> 1320 Hz (E6) with exponential decay
+            const osc1 = ctx.createOscillator()
+            const osc2 = ctx.createOscillator()
+            const gain = ctx.createGain()
+
+            osc1.type = 'sine'
+            osc1.frequency.setValueAtTime(880, now)
+            osc1.frequency.setValueAtTime(1320, now + 0.08)
+
+            osc2.type = 'triangle'
+            osc2.frequency.setValueAtTime(880 * 2, now)
+            osc2.frequency.setValueAtTime(1320 * 2, now + 0.08)
+
+            gain.gain.setValueAtTime(0.001, now)
+            gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02)
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35)
+
+            osc1.connect(gain)
+            osc2.connect(gain)
+            gain.connect(ctx.destination)
+
+            osc1.start(now)
+            osc2.start(now)
+            osc1.stop(now + 0.35)
+            osc2.stop(now + 0.35)
+        } catch (err) {
+            console.debug('[Audio] Could not play chime:', err)
+        }
+    }
 
     // Generation state
     const [publicData, setPublicData] = useState('')
@@ -53,7 +111,13 @@ function QRCode() {
     const [cameraError, setCameraError] = useState('')
     const [copiedField, setCopiedField] = useState('')
     const [pendingScan, setPendingScan] = useState(null)
-    const emptyFrameRetriesRef = useRef(0)
+    // Two separate retry counters for different failure modes:
+    //   magicFoundRetriesRef: PAYLOAD_DECODE_FAILED (magic header present, body RS-decode failed).
+    //     Allow up to 6 retries — stego QR detected, just needs a sharper frame.
+    //   noSecretRetriesRef: no magic found at all (regular QR or too blurry).
+    //     Keep at 3, since this likely means no hidden data.
+    const magicFoundRetriesRef = useRef(0)
+    const noSecretRetriesRef = useRef(0)
 
     // Camera scanner state: Keep camera active while on camera tab without extracted data,
     // but pause frame processing if a scan is pending password entry or in-flight.
@@ -102,7 +166,7 @@ function QRCode() {
             setExtractError('')
 
             const formData = new FormData()
-            formData.append('image', blob, 'scanned-qr.jpg')
+            formData.append('image', blob, 'scanned-qr.png')
 
             if (rawQrData) {
                 formData.append('raw_qr_data', rawQrData)
@@ -152,19 +216,27 @@ function QRCode() {
 
             // On live camera streams, allow up to 3 retry frames if no secret was detected yet,
             // giving the camera focus and sensor auto-exposure a moment to settle.
-            if (!response.data.secretData && scanMode === 'camera' && emptyFrameRetriesRef.current < 3) {
-                emptyFrameRetriesRef.current += 1
-                console.log(`[QRCode Component] Frame did not yield secret, retrying (${emptyFrameRetriesRef.current}/3)...`)
+            if (!response.data.secretData && scanMode === 'camera' && noSecretRetriesRef.current < 3) {
+                noSecretRetriesRef.current += 1
+                console.log(`[QRCode Component] Frame did not yield secret, retrying (${noSecretRetriesRef.current}/3)...`)
                 setExtractError('Scanning for hidden message... Please hold camera steady.')
                 return
             }
 
-            emptyFrameRetriesRef.current = 0
+            noSecretRetriesRef.current = 0
+            magicFoundRetriesRef.current = 0
             setPendingScan(null)
             setExtractedData({
                 publicData: response.data.publicData,
                 secretData: response.data.secretData
             })
+            // Physical reward feedback: Web Audio chime & haptic vibration
+            playSuccessChime()
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                try {
+                    navigator.vibrate(50)
+                } catch (e) {}
+            }
         } catch (err) {
             const scanId = err.response?.data?.cameraScanId || 'unknown'
             const failureReason = err.response?.data?.failureReason
@@ -173,15 +245,18 @@ function QRCode() {
 
             // PAYLOAD_DECODE_FAILED means the magic header was found but body RS-decode failed
             // due to optical distortion in this particular frame.  Auto-retry on the next frame
-            // rather than surfacing a hard error; the very next frame is often clean enough.
-            if (!isPwdRequired && failureReason === 'PAYLOAD_DECODE_FAILED' && scanMode === 'camera' && emptyFrameRetriesRef.current < 4) {
-                emptyFrameRetriesRef.current += 1
-                console.log(`[QRCode Component] Body decode failed (optical noise), retrying (${emptyFrameRetriesRef.current}/4)...`)
-                setExtractError('Scanning for hidden message... Please hold camera steady.')
+            // (with fast cooldown so the user doesn't wait 3 s) rather than surfacing a hard error.
+            if (!isPwdRequired && failureReason === 'PAYLOAD_DECODE_FAILED' && scanMode === 'camera' && magicFoundRetriesRef.current < 6) {
+                magicFoundRetriesRef.current += 1
+                console.log(`[QRCode Component] Body decode failed (optical noise), retrying (${magicFoundRetriesRef.current}/6)...`)
+                setExtractError('Hidden message detected — please hold camera steady for a clearer frame.')
+                // Fast cooldown: let a new frame be dispatched after 1.2 s instead of 3 s
+                clearCooldown(true)
                 return
             }
 
-            emptyFrameRetriesRef.current = 0
+            noSecretRetriesRef.current = 0
+            magicFoundRetriesRef.current = 0
             if (isPwdRequired) {
                 setPendingScan({ blob, rawQrData, corners, version })
                 setExtractError('Encrypted secret detected! Please enter the password below and click Unlock.')
@@ -196,6 +271,7 @@ function QRCode() {
 
     const handleUnlockPendingScan = async (e) => {
         if (e) e.preventDefault()
+        initAudioContext()
         if (!pendingScan) return
         if (!extractPassword) {
             setExtractError('Please enter the password to unlock this QR code')
@@ -207,7 +283,7 @@ function QRCode() {
             setExtractError('')
 
             const formData = new FormData()
-            formData.append('image', pendingScan.blob, 'scanned-qr.jpg')
+            formData.append('image', pendingScan.blob, 'scanned-qr.png')
             if (pendingScan.rawQrData) {
                 formData.append('raw_qr_data', pendingScan.rawQrData)
             }
@@ -231,6 +307,13 @@ function QRCode() {
                 publicData: response.data.publicData,
                 secretData: response.data.secretData
             })
+            // Physical reward feedback on successful unlock
+            playSuccessChime()
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                try {
+                    navigator.vibrate(50)
+                } catch (e) {}
+            }
         } catch (err) {
             console.error('[QRCode Component] Unlock error:', err)
             const errorMsg = err.response?.data?.error || 'Incorrect password or failed to unlock secret'
@@ -258,7 +341,21 @@ function QRCode() {
         setCameraError(msg)
     }
 
-    const { videoRef, canvasRef, error: scanError, isScanning: cameraActive, reset: resetScanner, boundingBox, clearCooldown } = useQRScanner(
+    const {
+        videoRef,
+        canvasRef,
+        error: scanError,
+        isScanning: cameraActive,
+        reset: resetScanner,
+        boundingBox,
+        stabilityState,
+        clearCooldown,
+        antiMoire,
+        toggleAntiMoire,
+        torchSupported,
+        torchOn,
+        toggleTorch,
+    } = useQRScanner(
         isCameraActive,
         handleQRDetected,
         handleScanError,
@@ -345,6 +442,7 @@ function QRCode() {
     }
 
     const handleVerifyInExtractor = async () => {
+        initAudioContext()
         if (!downloadId) return
         try {
             const response = await axios.get(`${API_URL}/api/qr/download/${downloadId}`, {
@@ -364,6 +462,7 @@ function QRCode() {
 
     const handleExtract = async (e) => {
         e.preventDefault()
+        initAudioContext()
         setExtractError('')
         setExtractedData(null)
 
@@ -392,6 +491,12 @@ function QRCode() {
                 publicData: response.data.publicData,
                 secretData: response.data.secretData
             })
+            playSuccessChime()
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                try {
+                    navigator.vibrate(50)
+                } catch (e) {}
+            }
         } catch (err) {
             const errorMsg = err.response?.data?.error || 'An error occurred while scanning the QR code'
             setExtractError(errorMsg)
@@ -425,7 +530,8 @@ function QRCode() {
         setExtractError('')
         setCameraError('')
         setPendingScan(null)
-        emptyFrameRetriesRef.current = 0
+        magicFoundRetriesRef.current = 0
+        noSecretRetriesRef.current = 0
         if (clearCooldown) clearCooldown()
         resetScanner()
         if (document.getElementById('uploaded-qr-input')) {
@@ -498,7 +604,7 @@ function QRCode() {
                     aria-selected={activeTab === 'extract'}
                     aria-controls="qr-panel-extract"
                     className={`tab-qr ${activeTab === 'extract' ? 'active' : ''}`}
-                    onClick={() => { setActiveTab('extract'); setError(''); setExtractError(''); }}
+                    onClick={() => { initAudioContext(); setActiveTab('extract'); setError(''); setExtractError(''); }}
                 >
                     <ScanLine size={16} aria-hidden="true" />
                     <span>Scan & Extract</span>
@@ -788,7 +894,7 @@ function QRCode() {
                                     aria-controls="scan-panel-camera"
                                     type="button"
                                     className={`mode-btn ${scanMode === 'camera' ? 'active' : ''}`}
-                                    onClick={() => setScanMode('camera')}
+                                    onClick={() => { initAudioContext(); setScanMode('camera'); }}
                                 >
                                     <Camera size={16} aria-hidden="true" />
                                     <span>Camera Scan</span>
@@ -804,63 +910,185 @@ function QRCode() {
                                                 <strong>Camera Scanning:</strong> Point your camera steadily at an InvisioVault QR code. Hold the code flat and well-lit. If the secret was encrypted with a password, you can enter it below to decrypt.
                                             </span>
                                         </p>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)' }}>
+                                            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                                                Camera Controls:
+                                            </span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                {torchSupported && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={toggleTorch}
+                                                        className="text-button"
+                                                        style={{
+                                                            fontSize: '0.75rem',
+                                                            padding: '2px 8px',
+                                                            borderRadius: '4px',
+                                                            background: torchOn ? 'rgba(255, 215, 0, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                                                            color: torchOn ? '#FFD700' : 'var(--text-secondary)',
+                                                            border: `1px solid ${torchOn ? '#FFD700' : 'var(--border-subtle)'}`,
+                                                            cursor: 'pointer',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '4px'
+                                                        }}
+                                                        title="Toggle camera flashlight torch"
+                                                    >
+                                                        <Zap size={13} aria-hidden="true" />
+                                                        <span>{torchOn ? 'Torch ON' : 'Torch OFF'}</span>
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={toggleAntiMoire}
+                                                    className="text-button"
+                                                    style={{
+                                                        fontSize: '0.75rem',
+                                                        padding: '2px 8px',
+                                                        borderRadius: '4px',
+                                                        background: antiMoire ? 'rgba(0, 255, 136, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+                                                        color: antiMoire ? '#00FF88' : 'var(--text-secondary)',
+                                                        border: `1px solid ${antiMoire ? '#00FF88' : 'var(--border-subtle)'}`,
+                                                        cursor: 'pointer'
+                                                    }}
+                                                    title="Toggles optical low-pass filtering to kill screen subpixel Moiré interference on digital screens"
+                                                >
+                                                    {antiMoire ? (
+                                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                            <ShieldCheck size={13} aria-hidden="true" />
+                                                            <span>Anti-Moiré (Screen)</span>
+                                                        </span>
+                                                    ) : (
+                                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                            <ShieldAlert size={13} aria-hidden="true" />
+                                                            <span>Disabled (Paper)</span>
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div className="camera-container">
                                         <video ref={videoRef} autoPlay playsInline muted allow="camera" className="camera-video" />
                                         <canvas ref={canvasRef} style={{ display: 'none' }} />
 
                                         {/* Dynamic Bounding Box Overlay */}
-                                        {cameraActive && boundingBox && videoRef.current && (() => {
-                                            const boxWidth = Math.hypot(
-                                                boundingBox.topRightCorner.x - boundingBox.topLeftCorner.x,
-                                                boundingBox.topRightCorner.y - boundingBox.topLeftCorner.y
-                                            );
-                                            const isTooSmall = boxWidth < 180;
-                                            return (
-                                                <>
-                                                    <svg
-                                                        className="qr-overlay"
-                                                        viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
-                                                        style={{
-                                                            position: 'absolute',
-                                                            top: 0,
-                                                            left: 0,
-                                                            width: '100%',
-                                                            height: '100%',
-                                                            pointerEvents: 'none',
-                                                            zIndex: 10
-                                                        }}
-                                                    >
-                                                        <path
-                                                            d={`M${boundingBox.topLeftCorner.x},${boundingBox.topLeftCorner.y} L${boundingBox.topRightCorner.x},${boundingBox.topRightCorner.y} L${boundingBox.bottomRightCorner.x},${boundingBox.bottomRightCorner.y} L${boundingBox.bottomLeftCorner.x},${boundingBox.bottomLeftCorner.y} Z`}
-                                                            fill={isTooSmall ? "rgba(255, 165, 0, 0.2)" : "rgba(0, 255, 0, 0.2)"}
-                                                            stroke={isTooSmall ? "#FFA500" : "#00FF00"}
-                                                            strokeWidth="4"
-                                                            strokeLinejoin="round"
-                                                        />
-                                                    </svg>
-                                                    {isTooSmall && (
-                                                        <div style={{
-                                                            position: 'absolute',
-                                                            bottom: '16px',
-                                                            left: '50%',
-                                                            transform: 'translateX(-50%)',
-                                                            background: 'rgba(0, 0, 0, 0.8)',
-                                                            color: '#FFA500',
-                                                            padding: '6px 14px',
-                                                            borderRadius: '20px',
-                                                            fontSize: '0.82rem',
-                                                            fontWeight: '500',
-                                                            pointerEvents: 'none',
-                                                            zIndex: 12,
-                                                            border: '1px solid #FFA500'
-                                                        }}>
-                                                            Move closer for optical scanning
-                                                        </div>
-                                                    )}
-                                                </>
-                                            );
-                                        })()}
+                                                {cameraActive && boundingBox && videoRef.current && (() => {
+                                                const boxWidth = Math.hypot(
+                                                    boundingBox.topRightCorner.x - boundingBox.topLeftCorner.x,
+                                                    boundingBox.topRightCorner.y - boundingBox.topLeftCorner.y
+                                                );
+                                                // Stricter threshold: 350px ensures physical sensor resolves >= 5-8 px/module
+                                                const MIN_BOX_WIDTH = 350;
+                                                const isTooSmall = boxWidth < MIN_BOX_WIDTH;
+
+                                                // Detect mobile touch devices
+                                                const isMobile = typeof navigator !== 'undefined' && (
+                                                    /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || 
+                                                    navigator.maxTouchPoints > 0
+                                                );
+
+                                                // Stability pill label & icon
+                                                let pillLabel = null
+                                                let pillIcon = null
+                                                let pillColor = '#00FF00'
+                                                let pillBg = 'rgba(0,0,0,0.75)'
+                                                if (isTooSmall) {
+                                                    pillIcon = <Camera size={14} aria-hidden="true" />
+                                                    pillLabel = 'Move closer'
+                                                    pillColor = '#FFA500'
+                                                } else if (stabilityState === 'blurry') {
+                                                    pillIcon = <AlertCircle size={14} aria-hidden="true" />
+                                                    pillLabel = 'Better lighting needed'
+                                                    pillColor = '#FFD700'
+                                                } else if (stabilityState === 'stabilizing') {
+                                                    pillIcon = <RotateCcw size={14} aria-hidden="true" />
+                                                    pillLabel = 'Stabilizing…'
+                                                    pillColor = '#87CEEB'
+                                                } else if (stabilityState === 'ready') {
+                                                    pillIcon = <CheckCircle2 size={14} aria-hidden="true" />
+                                                    pillLabel = 'Aligned — scanning…'
+                                                    pillColor = '#00FF88'
+                                                }
+
+                                                return (
+                                                    <>
+                                                        <svg
+                                                            className="qr-overlay"
+                                                            viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
+                                                            style={{
+                                                                position: 'absolute',
+                                                                top: 0,
+                                                                left: 0,
+                                                                width: '100%',
+                                                                height: '100%',
+                                                                pointerEvents: 'none',
+                                                                zIndex: 10
+                                                            }}
+                                                        >
+                                                            <path
+                                                                d={`M${boundingBox.topLeftCorner.x},${boundingBox.topLeftCorner.y} L${boundingBox.topRightCorner.x},${boundingBox.topRightCorner.y} L${boundingBox.bottomRightCorner.x},${boundingBox.bottomRightCorner.y} L${boundingBox.bottomLeftCorner.x},${boundingBox.bottomLeftCorner.y} Z`}
+                                                                fill={isTooSmall ? "rgba(255, 165, 0, 0.2)" : stabilityState === 'ready' ? "rgba(0, 255, 136, 0.15)" : "rgba(0, 255, 0, 0.2)"}
+                                                                stroke={isTooSmall ? "#FFA500" : pillColor}
+                                                                strokeWidth="4"
+                                                                strokeLinejoin="round"
+                                                            />
+                                                        </svg>
+
+                                                        {/* Mobile Touch-to-Focus Contextual Tip */}
+                                                        {isMobile && isTooSmall && (
+                                                            <div style={{
+                                                                position: 'absolute',
+                                                                top: '16px',
+                                                                left: '50%',
+                                                                transform: 'translateX(-50%)',
+                                                                background: 'rgba(0, 0, 0, 0.85)',
+                                                                color: '#FFD700',
+                                                                padding: '8px 16px',
+                                                                borderRadius: '12px',
+                                                                fontSize: '0.78rem',
+                                                                fontWeight: '500',
+                                                                textAlign: 'center',
+                                                                maxWidth: '90%',
+                                                                pointerEvents: 'none',
+                                                                zIndex: 12,
+                                                                border: '1px solid rgba(255, 215, 0, 0.4)',
+                                                                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                                                            }}>
+                                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                                                    <Info size={14} aria-hidden="true" style={{ flexShrink: 0, color: '#FFD700' }} />
+                                                                    <span>Tip: If blurry, tap the screen to focus, or move back slightly and let the QR fill the frame.</span>
+                                                                </span>
+                                                            </div>
+                                                        )}
+
+                                                        {pillLabel && (
+                                                            <div style={{
+                                                                position: 'absolute',
+                                                                bottom: '16px',
+                                                                left: '50%',
+                                                                transform: 'translateX(-50%)',
+                                                                background: pillBg,
+                                                                color: pillColor,
+                                                                padding: '6px 14px',
+                                                                borderRadius: '20px',
+                                                                fontSize: '0.82rem',
+                                                                fontWeight: '500',
+                                                                pointerEvents: 'none',
+                                                                zIndex: 12,
+                                                                border: `1px solid ${pillColor}`,
+                                                                whiteSpace: 'nowrap',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '6px',
+                                                            }}>
+                                                                {pillIcon}
+                                                                <span>{pillLabel}</span>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                );
+                                            })()}
 
                                         {!cameraActive && !scanError && (
                                             <div className="camera-placeholder">

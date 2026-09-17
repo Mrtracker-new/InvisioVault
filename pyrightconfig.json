@@ -6,14 +6,18 @@
   ],
   "extraPaths": [
     "backend",
-    "./backend"
+    "./backend",
+    ".venv/Lib/site-packages",
+    "backend/.venv/Lib/site-packages"
   ],
   "executionEnvironments": [
     {
       "root": ".",
       "extraPaths": [
         "backend",
-        "./backend"
+        "./backend",
+        ".venv/Lib/site-packages",
+        "backend/.venv/Lib/site-packages"
       ]
     }
   ],

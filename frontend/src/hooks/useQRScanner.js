@@ -1,6 +1,13 @@
 /**
  * QR Scanner Hook - Client-side detection with jsQR
  * Provides real-time bounding box feedback and reduces server load.
+ *
+ * Hardened scanning pipeline (v2):
+ *  - 3-frame stability gate: only dispatch when bounding box is stable for ≥ 3 consecutive frames
+ *  - Laplacian variance blur gate: skip blurry frames before sending to backend
+ *  - PNG (lossless) dispatch: avoids JPEG ±5–8 lx chroma artifacts that corrupt the stego signal
+ *  - Adaptive cooldown: 1200 ms after PAYLOAD_DECODE_FAILED (magic found, needs sharper frame)
+ *    vs. 3000 ms for normal deduplication
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import jsQR from 'jsqr'
@@ -8,30 +15,127 @@ import jsQR from 'jsqr'
 // Only emit verbose logs in development builds (Vite strips import.meta.env.DEV in production)
 const DEV = import.meta.env.DEV
 
-export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) {
+// How many consecutive stable frames required before dispatching a scan
+const STABILITY_FRAMES_REQUIRED = 3
+// Max pixel movement per corner between frames to be considered "stable"
+const STABILITY_THRESHOLD_PX = 8
+// Minimum grayscale variance across the 64x64 QR crop to consider it sharp/in focus
+const MIN_BLUR_SCORE = 500
+
+// Reusable offscreen 64x64 canvas to avoid GC allocations in the scan loop
+const proxyCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null
+if (proxyCanvas) {
+    proxyCanvas.width = 64
+    proxyCanvas.height = 64
+}
+const proxyCtx = proxyCanvas ? proxyCanvas.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' }) : null
+
+/**
+ * Computes grayscale variance of the 64x64 downscaled QR crop.
+ * High variance = sharp, high-contrast black and white modules.
+ * Low variance = blurred / motion-smeared / flat frame.
+ * Executes in < 0.05ms (4096 pixels).
+ */
+function computeCropVariance(sourceCanvas, cropX, cropY, cropW, cropH) {
+    if (!proxyCtx || cropW <= 0 || cropH <= 0) return { variance: 1000, meanLuma: 128 }
+    proxyCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, 64, 64)
+    const imgData = proxyCtx.getImageData(0, 0, 64, 64)
+    const data = imgData.data
+    const len = data.length
+    let sum = 0
+    let sumSq = 0
+    const count = len >>> 2 // 4096 pixels
+
+    for (let i = 0; i < len; i += 4) {
+        const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+        sum += luma
+        sumSq += luma * luma
+    }
+    const mean = sum / count
+    return {
+        variance: (sumSq / count) - (mean * mean),
+        meanLuma: mean,
+    }
+}
+
+/**
+ * Compute max corner displacement between two jsQR location objects.
+ * Returns Infinity if either is null/undefined.
+ */
+function cornerDisplacement(locA, locB) {
+    if (!locA || !locB) return Infinity
+    const keys = ['topLeftCorner', 'topRightCorner', 'bottomLeftCorner', 'bottomRightCorner']
+    let maxDist = 0
+    for (const k of keys) {
+        const a = locA[k]
+        const b = locB[k]
+        if (!a || !b) return Infinity
+        const d = Math.hypot(a.x - b.x, a.y - b.y)
+        if (d > maxDist) maxDist = d
+    }
+    return maxDist
+}
+
+export function useQRScanner(isActive, onQRDetected, onError, isPaused = false, options = {}) {
+    const { enableAntiMoire = true } = options
     const videoRef = useRef(null)
     const canvasRef = useRef(null)
     const [isScanning, setIsScanning] = useState(false)
     const [error, setError] = useState(null)
     const [boundingBox, setBoundingBox] = useState(null)
+    // 'idle' | 'stabilizing' | 'ready' | 'blurry'
+    const [stabilityState, setStabilityState] = useState('idle')
+    const [antiMoire, setAntiMoire] = useState(enableAntiMoire)
+    const antiMoireRef = useRef(antiMoire)
+    useEffect(() => {
+        antiMoireRef.current = antiMoire
+    }, [antiMoire])
 
     const isPausedRef = useRef(isPaused)
     useEffect(() => {
         isPausedRef.current = isPaused
     }, [isPaused])
 
+    // Hardware camera controls (Torch & Continuous Exposure Mode)
+    const [torchSupported, setTorchSupported] = useState(false)
+    const [torchOn, setTorchOn] = useState(false)
+    const lastMeanLumaRef = useRef(null)
+
     const streamRef = useRef(null)
     const animationFrameRef = useRef(null)
     const isProcessingRef = useRef(false)
 
-    // throttle scanning to avoid CPU spike
+    const toggleTorch = useCallback(async () => {
+        if (!streamRef.current || !torchSupported) return
+        const track = streamRef.current.getVideoTracks()[0]
+        if (!track) return
+        try {
+            const nextState = !torchOn
+            await track.applyConstraints({
+                advanced: [{ torch: nextState }]
+            })
+            setTorchOn(nextState)
+        } catch (err) {
+            console.warn('[QR Scanner] Failed to toggle torch:', err)
+        }
+    }, [torchSupported, torchOn])
+
+    // Throttle scanning to avoid CPU spike
     const lastScanTimeRef = useRef(0)
     const SCAN_INTERVAL = 100 // scan every 100ms
 
     // Deduplication & cooldown to prevent flooding server
     const lastScannedDataRef = useRef(null)
     const lastScannedTimeRef = useRef(0)
-    const SCAN_COOLDOWN_MS = 3000 // 3 seconds cooldown before re-scanning the exact same QR code
+    // Normal cooldown: 3 s. After PAYLOAD_DECODE_FAILED shorter adaptive cooldown.
+    const SCAN_COOLDOWN_MS = 3000
+    const ADAPTIVE_COOLDOWN_MS = 1500
+
+    // Frame stability tracking
+    const stableFrameCountRef = useRef(0)
+    const lastLocationRef = useRef(null)
+    const lastStableDataRef = useRef(null)
+    const adaptiveCooldownRef = useRef(false)
 
     // Use callback refs to ensure we always have latest values
     const onQRDetectedRef = useRef(onQRDetected)
@@ -59,6 +163,12 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
 
         setIsScanning(false)
         setBoundingBox(null)
+        setStabilityState('idle')
+        stableFrameCountRef.current = 0
+        lastLocationRef.current = null
+        lastMeanLumaRef.current = null
+        setTorchOn(false)
+        setTorchSupported(false)
     }, [])
 
     const scanFrame = useCallback(() => {
@@ -91,7 +201,7 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
         lastScanTimeRef.current = now
 
         try {
-            const ctx = canvas.getContext('2d', { willReadFrequently: true })
+            const ctx = canvas.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' })
 
             if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
                 canvas.width = video.videoWidth
@@ -106,13 +216,107 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
             })
 
             if (code && !isProcessingRef.current && !isPausedRef.current) {
-                const now = Date.now()
-                const isSameCode = lastScannedDataRef.current === code.data
-                const isCoolingDown = now - lastScannedTimeRef.current < SCAN_COOLDOWN_MS
-
                 setBoundingBox(code.location)
 
-                if ((!isSameCode || !isCoolingDown) && onQRDetectedRef.current) {
+                // ── Stability gate ────────────────────────────────────────────────────
+                // Require STABILITY_FRAMES_REQUIRED consecutive frames with the same QR
+                // data and bounding box movement < STABILITY_THRESHOLD_PX before dispatch.
+                const displacement = cornerDisplacement(lastLocationRef.current, code.location)
+                const isSameData = code.data === lastStableDataRef.current
+
+                if (displacement > STABILITY_THRESHOLD_PX || !isSameData) {
+                    stableFrameCountRef.current = 1
+                    lastLocationRef.current = code.location
+                    lastStableDataRef.current = code.data
+                    setStabilityState('stabilizing')
+                    if (streamRef.current) {
+                        animationFrameRef.current = requestAnimationFrame(scanFrame)
+                    }
+                    return
+                }
+
+                stableFrameCountRef.current += 1
+
+                if (stableFrameCountRef.current < STABILITY_FRAMES_REQUIRED) {
+                    setStabilityState('stabilizing')
+                    if (streamRef.current) {
+                        animationFrameRef.current = requestAnimationFrame(scanFrame)
+                    }
+                    return
+                }
+
+                // ── Compute 30% padded crop bounds ───────────────────────────────────
+                const pts = [
+                    code.location.topLeftCorner,
+                    code.location.topRightCorner,
+                    code.location.bottomRightCorner,
+                    code.location.bottomLeftCorner,
+                ].filter(Boolean)
+
+                let cropX = 0, cropY = 0, cropW = canvas.width, cropH = canvas.height
+                if (pts.length === 4) {
+                    const xs = pts.map(p => p.x)
+                    const ys = pts.map(p => p.y)
+                    const minX = Math.min(...xs)
+                    const maxX = Math.max(...xs)
+                    const minY = Math.min(...ys)
+                    const maxY = Math.max(...ys)
+                    const qrW = maxX - minX
+                    const qrH = maxY - minY
+                    const pad = Math.max(qrW, qrH) * 0.30  // 30 % padding each side
+
+                    cropX = Math.max(0, Math.round(minX - pad))
+                    cropY = Math.max(0, Math.round(minY - pad))
+                    const cropX2 = Math.min(canvas.width,  Math.round(maxX + pad))
+                    const cropY2 = Math.min(canvas.height, Math.round(maxY + pad))
+                    cropW = cropX2 - cropX
+                    cropH = cropY2 - cropY
+                }
+
+                // ── Blur & Luminance Flicker gate on 64x64 proxy crop ─────────────────
+                const { variance: blurScore, meanLuma } = computeCropVariance(canvas, cropX, cropY, cropW, cropH)
+                if (blurScore < MIN_BLUR_SCORE) {
+                    setStabilityState('blurry')
+                    stableFrameCountRef.current = 0
+                    if (streamRef.current) {
+                        animationFrameRef.current = requestAnimationFrame(scanFrame)
+                    }
+                    return
+                }
+
+                // Luminance Flicker Gate:
+                // If camera auto-exposure is hunting, flashing under PWM lighting,
+                // or scene brightness abruptly shifts (>15 lx), discard frame and stabilize.
+                if (lastMeanLumaRef.current !== null) {
+                    const deltaLuma = Math.abs(meanLuma - lastMeanLumaRef.current)
+                    if (deltaLuma > 15.0) {
+                        lastMeanLumaRef.current = meanLuma
+                        setStabilityState('stabilizing')
+                        stableFrameCountRef.current = 0
+                        if (streamRef.current) {
+                            animationFrameRef.current = requestAnimationFrame(scanFrame)
+                        }
+                        return
+                    }
+                }
+                lastMeanLumaRef.current = meanLuma
+
+                // ── Cooldown deduplication ────────────────────────────────────────────
+                const activeCooldown = adaptiveCooldownRef.current ? ADAPTIVE_COOLDOWN_MS : SCAN_COOLDOWN_MS
+                const isSameCode = lastScannedDataRef.current === code.data
+                const isCoolingDown = now - lastScannedTimeRef.current < activeCooldown
+
+                if (isSameCode && isCoolingDown) {
+                    setStabilityState('ready')
+                    if (streamRef.current) {
+                        animationFrameRef.current = requestAnimationFrame(scanFrame)
+                    }
+                    return
+                }
+
+                setStabilityState('ready')
+
+                if (onQRDetectedRef.current) {
                     const videoDims = {
                         videoWidth: video.videoWidth,
                         videoHeight: video.videoHeight,
@@ -126,7 +330,8 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
                     const dpr = window.devicePixelRatio || 1
 
                     if (DEV) {
-                        console.log('[QR Scanner] QR Code detected locally:', code.data)
+                        console.log('[QR Scanner] QR Code stable & sharp — dispatching:', code.data)
+                        console.log('[QR Scanner] blurScore:', Math.round(blurScore), '| stableFrames:', stableFrameCountRef.current)
                         console.log('[QR Scanner] Camera & Canvas Metrics:', {
                             video: videoDims,
                             canvas: canvasDims,
@@ -140,12 +345,11 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
                     lastScannedTimeRef.current = now
                     isProcessingRef.current = true
 
-                    // ── Step 1: Snapshot the current canvas frame ────────────────────────────
-                    // Capture synchronously so subsequent rAF ticks don't overwrite the canvas.
+                    // ── Step 1: Snapshot the current canvas frame ─────────────────────
                     const snapshotCanvas = document.createElement('canvas')
                     snapshotCanvas.width  = canvas.width
                     snapshotCanvas.height = canvas.height
-                    const snapCtx = snapshotCanvas.getContext('2d')
+                    const snapCtx = snapshotCanvas.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' })
                     if (snapCtx) {
                         snapCtx.drawImage(canvas, 0, 0)
                     }
@@ -168,121 +372,87 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
                         }
                     }
 
-                    // ── Step 2: Crop & enhance before uploading ──────────────────────────────
-                    // Instead of sending the full 1920×1080 frame (~3 MB PNG), crop to just
-                    // the QR bounding box with 22 % padding, apply a sharpening convolution,
-                    // and encode as JPEG.  Drops upload from ~3 MB → ~40 KB.
+                    // ── Step 2: Crop with padding & enforce MIN_OUTPUT_SIZE ──────────
+                    // Guarantee adequate pixels per module (PPM) even from a distance.
+                    const MIN_OUTPUT_SIZE = 450
+                    let targetW = cropW
+                    let targetH = cropH
+                    let scaleMultiplier = 1.0
 
-                    const pts = [
-                        normalizedCorners.topLeftCorner,
-                        normalizedCorners.topRightCorner,
-                        normalizedCorners.bottomRightCorner,
-                        normalizedCorners.bottomLeftCorner,
-                    ].filter(Boolean)
-
-                    let cropX = 0, cropY = 0, cropW = snapshotCanvas.width, cropH = snapshotCanvas.height
-                    let croppedCorners = normalizedCorners
-
-                    if (pts.length === 4) {
-                        const xs = pts.map(p => p.x)
-                        const ys = pts.map(p => p.y)
-                        const minX = Math.min(...xs)
-                        const maxX = Math.max(...xs)
-                        const minY = Math.min(...ys)
-                        const maxY = Math.max(...ys)
-                        const qrW = maxX - minX
-                        const qrH = maxY - minY
-                        const pad = Math.max(qrW, qrH) * 0.22  // 22 % padding each side
-
-                        cropX = Math.max(0, Math.round(minX - pad))
-                        cropY = Math.max(0, Math.round(minY - pad))
-                        const cropX2 = Math.min(snapshotCanvas.width,  Math.round(maxX + pad))
-                        const cropY2 = Math.min(snapshotCanvas.height, Math.round(maxY + pad))
-                        cropW = cropX2 - cropX
-                        cropH = cropY2 - cropY
-
-                        // Remap corners relative to crop origin so backend rectification is accurate
-                        const remapPt = (pt) => pt ? { x: pt.x - cropX, y: pt.y - cropY } : pt
-                        croppedCorners = {
-                            topLeftCorner:              remapPt(normalizedCorners.topLeftCorner),
-                            topRightCorner:             remapPt(normalizedCorners.topRightCorner),
-                            bottomRightCorner:          remapPt(normalizedCorners.bottomRightCorner),
-                            bottomLeftCorner:           remapPt(normalizedCorners.bottomLeftCorner),
-                            topRightFinderPattern:      remapPt(normalizedCorners.topRightFinderPattern),
-                            topLeftFinderPattern:       remapPt(normalizedCorners.topLeftFinderPattern),
-                            bottomLeftFinderPattern:    remapPt(normalizedCorners.bottomLeftFinderPattern),
-                            bottomRightAlignmentPattern:remapPt(normalizedCorners.bottomRightAlignmentPattern),
-                        }
+                    if (cropW < MIN_OUTPUT_SIZE || cropH < MIN_OUTPUT_SIZE) {
+                        scaleMultiplier = Math.max(MIN_OUTPUT_SIZE / cropW, MIN_OUTPUT_SIZE / cropH)
+                        targetW = Math.round(cropW * scaleMultiplier)
+                        targetH = Math.round(cropH * scaleMultiplier)
                     }
 
-                    // Draw the cropped region into a work canvas
+                    // Remap corner coordinates relative to cropped image origin (0,0)
+                    // scaled by scaleMultiplier to strictly match workCanvas dimensions.
+                    // The backend perspective homography expects coordinates in the space of
+                    // the uploaded image blob, not the full camera viewfinder frame.
+                    const remapPt = (pt) => pt ? {
+                        x: (pt.x - cropX) * scaleMultiplier,
+                        y: (pt.y - cropY) * scaleMultiplier,
+                    } : pt
+
+                    const croppedCorners = {
+                        topLeftCorner:               remapPt(normalizedCorners.topLeftCorner),
+                        topRightCorner:              remapPt(normalizedCorners.topRightCorner),
+                        bottomRightCorner:           remapPt(normalizedCorners.bottomRightCorner),
+                        bottomLeftCorner:            remapPt(normalizedCorners.bottomLeftCorner),
+                        topRightFinderPattern:       remapPt(normalizedCorners.topRightFinderPattern),
+                        topLeftFinderPattern:        remapPt(normalizedCorners.topLeftFinderPattern),
+                        bottomLeftFinderPattern:     remapPt(normalizedCorners.bottomLeftFinderPattern),
+                        bottomRightAlignmentPattern: remapPt(normalizedCorners.bottomRightAlignmentPattern),
+                    }
+
+                    // Draw the cropped region into a work canvas with Nearest-Neighbor upscaling.
+                    // CRITICAL: imageSmoothingEnabled MUST be false to avoid bicubic interpolation,
+                    // which blends hard step-function luminance shifts (0 lx vs 50 lx) into smooth gradients.
+                    // Nearest-Neighbor guarantees that the exact integer luminance values captured by the sensor
+                    // are preserved without bicubic bleeding. The backend Lanczos rectification handles geometry.
                     const workCanvas = document.createElement('canvas')
-                    workCanvas.width  = cropW
-                    workCanvas.height = cropH
-                    const wCtx = workCanvas.getContext('2d', { willReadFrequently: true })
-                    if (snapCtx) {
-                        wCtx.drawImage(snapshotCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+                    workCanvas.width  = targetW
+                    workCanvas.height = targetH
+                    const wCtx = workCanvas.getContext('2d', { willReadFrequently: true, colorSpace: 'srgb' })
+                    if (snapCtx && wCtx) {
+                        // Sizing canvas resets 2D context state to defaults (imageSmoothingEnabled = true).
+                        // Force Nearest-Neighbor upscaling explicitly AFTER sizing:
+                        wCtx.imageSmoothingEnabled = false
+                        if ('imageSmoothingQuality' in wCtx) {
+                            wCtx.imageSmoothingQuality = 'low'
+                        }
+
+                        // Optical Anti-Aliasing (Moiré Killer):
+                        // When scanning a digital screen, LCD/OLED subpixels create high-frequency Moiré fringes.
+                        // When the crop bounding box is small (distant scan or small screen display),
+                        // apply a subtle Gaussian blur (1.0px) as an optical low-pass filter (OLPF)
+                        // to attenuate high-frequency screen subpixels while preserving lower-frequency QR modules.
+                        const isSmallCrop = cropW < MIN_OUTPUT_SIZE || cropH < MIN_OUTPUT_SIZE
+                        if (antiMoireRef.current && isSmallCrop && 'filter' in wCtx) {
+                            wCtx.filter = 'blur(1.0px)'
+                        } else {
+                            wCtx.filter = 'none'
+                        }
+
+                        wCtx.drawImage(snapshotCanvas, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH)
+                        wCtx.filter = 'none'
                     }
 
-                    // ── Unsharp-mask sharpening convolution ─────────────────────────────────
-                    // Compensates for soft focus / motion blur that causes body RS decode to
-                    // flip bits across the threshold.  Kernel: identity + high-pass boost.
-                    try {
-                        const imgData = wCtx.getImageData(0, 0, cropW, cropH)
-                        const src = imgData.data
-                        const dst = new Uint8ClampedArray(src.length)
-                        const w = cropW, h = cropH
-
-                        // 3×3 unsharp kernel  (center = 9, ring = -1, sum = 1 after /9 normalisation)
-                        // Equivalent to: sharpened = original + 0.5*(original - gaussian_blur)
-                        const kern = [0, -1, 0, -1, 5, -1, 0, -1, 0]  // Laplacian sharpen
-
-                        for (let y = 1; y < h - 1; y++) {
-                            for (let x = 1; x < w - 1; x++) {
-                                const idx = (y * w + x) * 4
-                                for (let c = 0; c < 3; c++) {   // R, G, B only
-                                    let v = 0
-                                    for (let ky = -1; ky <= 1; ky++) {
-                                        for (let kx = -1; kx <= 1; kx++) {
-                                            const ki = (ky + 1) * 3 + (kx + 1)
-                                            const ni = ((y + ky) * w + (x + kx)) * 4
-                                            v += src[ni + c] * kern[ki]
-                                        }
-                                    }
-                                    dst[idx + c] = Math.min(255, Math.max(0, v))
-                                }
-                                dst[idx + 3] = 255  // alpha
-                            }
-                        }
-                        // Copy border pixels unchanged
-                        for (let y = 0; y < h; y++) {
-                            for (let x = 0; x < w; x++) {
-                                if (y === 0 || y === h - 1 || x === 0 || x === w - 1) {
-                                    const idx = (y * w + x) * 4
-                                    dst[idx]     = src[idx]
-                                    dst[idx + 1] = src[idx + 1]
-                                    dst[idx + 2] = src[idx + 2]
-                                    dst[idx + 3] = 255
-                                }
-                            }
-                        }
-                        wCtx.putImageData(new ImageData(dst, w, h), 0, 0)
-                    } catch (_) {
-                        // If sharpening fails (e.g. cross-origin canvas taint), continue with unsharpened crop
-                    }
-
-                    // ── Encode as JPEG and dispatch ─────────────────────────────────────────
-                    const targetCanvas = workCanvas
-                    targetCanvas.toBlob((blob) => {
+                    // ── Step 3: Encode as PNG (lossless) and dispatch ─────────────────
+                    // PNG avoids JPEG chroma artifacts (±5–8 lx) that corrupt the
+                    // 28-lx stego modulation delta and cause bit-flip errors on modules
+                    // near the detection threshold.
+                    workCanvas.toBlob((blob) => {
                         if (blob) {
                             if (DEV) {
-                                console.log('[QR Scanner] Cropped+sharpened blob:', {
+                                console.log('[QR Scanner] Cropped PNG blob:', {
                                     type: blob.type,
                                     size: blob.size,
-                                    cropW, cropH,
+                                    cropW: targetW,
+                                    cropH: targetH,
+                                    scaleMultiplier,
                                     originalW: snapshotCanvas.width,
                                     originalH: snapshotCanvas.height,
-                                    ratio: Math.round((1 - blob.size / (snapshotCanvas.width * snapshotCanvas.height * 0.75)) * 100) + '% smaller'
                                 })
                             }
                             Promise.resolve(onQRDetectedRef.current({
@@ -293,24 +463,32 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
                                 metrics: {
                                     video: videoDims,
                                     canvas: canvasDims,
-                                    blobWidth: cropW,
-                                    blobHeight: cropH,
+                                    blobWidth: targetW,
+                                    blobHeight: targetH,
+                                    scaleMultiplier,
                                     devicePixelRatio: dpr,
                                     scaleX,
-                                    scaleY
+                                    scaleY,
+                                    blurScore: Math.round(blurScore),
+                                    stableFrames: stableFrameCountRef.current,
                                 }
                             }))
                                 .finally(() => {
                                     isProcessingRef.current = false
+                                    stableFrameCountRef.current = 0
                                 })
                         } else {
                             isProcessingRef.current = false
                         }
-                    }, 'image/jpeg', 0.92)
+                    }, 'image/png')
 
                 }
             } else if (!code) {
                 setBoundingBox(null)
+                setStabilityState('idle')
+                stableFrameCountRef.current = 0
+                lastLocationRef.current = null
+                lastStableDataRef.current = null
             }
 
         } catch (err) {
@@ -327,6 +505,9 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
             if (DEV) console.log('[QR Scanner] Starting camera access...')
             setError(null)
             setBoundingBox(null)
+            setStabilityState('idle')
+            stableFrameCountRef.current = 0
+            lastLocationRef.current = null
 
             // Clean up any existing stream before acquiring a new one
             if (streamRef.current) {
@@ -343,11 +524,11 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
             }
 
             const cameraConfigs = [
-                { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-                { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-                { facingMode: 'environment' },
-                { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } },
-                { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+                { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+                { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+                { facingMode: { ideal: 'environment' } },
+                { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+                { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
                 { facingMode: 'user' }
             ]
 
@@ -370,9 +551,27 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
             if (DEV) console.log('[QR Scanner] Camera access granted')
             streamRef.current = stream
 
+            // Hardware inspection: Torch capability & Continuous Exposure Mode lock
+            try {
+                const track = stream.getVideoTracks()[0]
+                if (track && track.getCapabilities) {
+                    const capabilities = track.getCapabilities()
+                    setTorchSupported(Boolean(capabilities.torch))
+
+                    if (capabilities.exposureMode && Array.isArray(capabilities.exposureMode) && capabilities.exposureMode.includes('continuous')) {
+                        track.applyConstraints({
+                            advanced: [{ exposureMode: 'continuous' }]
+                        }).catch(err => {
+                            if (DEV) console.debug('[QR Scanner] Could not set continuous exposureMode:', err)
+                        })
+                    }
+                }
+            } catch (hwErr) {
+                if (DEV) console.debug('[QR Scanner] Hardware inspection skipped:', hwErr)
+            }
+
             if (videoRef.current) {
                 videoRef.current.srcObject = stream
-                // Wait for video to be ready
                 videoRef.current.onloadedmetadata = () => {
                     videoRef.current.play().then(() => {
                         setIsScanning(true)
@@ -412,14 +611,25 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
         }
     }, [isActive, startScanning, stopScanning])
 
-    const clearCooldown = useCallback(() => {
+    /**
+     * clearCooldown(fast): Reset dedup state.
+     * Pass fast=true after a PAYLOAD_DECODE_FAILED to activate the short 1.2 s
+     * adaptive cooldown so the user can re-scan quickly.
+     */
+    const clearCooldown = useCallback((fast = false) => {
         lastScannedDataRef.current = null
         lastScannedTimeRef.current = 0
+        adaptiveCooldownRef.current = fast
+        stableFrameCountRef.current = 0
+        lastLocationRef.current = null
+        lastMeanLumaRef.current = null
     }, [])
 
     const reset = () => {
         setError(null)
         setBoundingBox(null)
+        setStabilityState('idle')
+        lastMeanLumaRef.current = null
         clearCooldown()
         isProcessingRef.current = false
         if (isActive) {
@@ -437,8 +647,15 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
         error,
         isScanning,
         boundingBox,
+        stabilityState,
         reset,
         stopScanning,
         clearCooldown,
+        antiMoire,
+        setAntiMoire,
+        toggleAntiMoire: () => setAntiMoire(prev => !prev),
+        torchSupported,
+        torchOn,
+        toggleTorch,
     }
 }

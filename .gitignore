@@ -97,6 +97,7 @@ backend/__pycache__/
 backend/**/__pycache__/
 
 #useless_files
+debug_scans/
 docs_ignore/
 start.bat
 scratch/
