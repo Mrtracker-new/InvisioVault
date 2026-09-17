@@ -295,9 +295,9 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
             secret = os.urandom(s).hex()[:s]
             expected_sha256 = hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
-            # 1. Encrypted stream QR
+            # 1. Encrypted visual QR
             enc_path = os.path.join(self.temp_dir, f"sha_qr_enc_{s}.png")
-            generate_qr_with_stego("https://invisiovault.app", secret, enc_path, password=pwd, method="stream")
+            generate_qr_with_stego("https://invisiovault.app", secret, enc_path, password=pwd)
             _, ext_secret = extract_from_qr_stego(enc_path, password=pwd)
             self.assertEqual(
                 hashlib.sha256(ext_secret.encode("utf-8")).hexdigest(),
@@ -305,9 +305,9 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
                 f"Encrypted QR payload SHA-256 mismatch at {s} bytes"
             )
 
-            # 2. Plain stream QR
+            # 2. Plain visual QR
             plain_path = os.path.join(self.temp_dir, f"sha_qr_plain_{s}.png")
-            generate_qr_with_stego("https://invisiovault.app", secret, plain_path, method="stream")
+            generate_qr_with_stego("https://invisiovault.app", secret, plain_path)
             _, ext_plain = extract_from_qr_stego(plain_path)
             self.assertEqual(
                 hashlib.sha256(ext_plain.encode("utf-8")).hexdigest(),

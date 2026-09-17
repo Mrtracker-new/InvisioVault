@@ -9,9 +9,11 @@ from io import BytesIO
 from collections import OrderedDict
 import logging
 import hashlib
+import json
 import re
 import time
 import threading
+from typing import Any, Dict
 
 # Import the shared limiter instance (created in extensions.py without a bound
 # app so it can be imported here before the app factory runs).  This is the
@@ -738,11 +740,9 @@ def generate_qr_code():
                 # If logo validation fails, continue without logo
                 logo_path = None
 
-        method = request.form.get('method', 'auto').strip().lower()
-        if method not in ('auto', 'stream', 'visual'):
-            method = 'auto'
+        method = request.form.get('method', 'visual').strip().lower()
 
-        # Generate QR code with steganography
+        # Generate QR code with steganography (visual mode only)
         output_filename = f"{secrets.token_urlsafe(16)}_qr.png"
         output_path = os.path.join(upload_folder, output_filename)
 
@@ -765,6 +765,12 @@ def generate_qr_code():
             'download_id': output_filename
         }), 200
 
+    except QRStegoError as e:
+        logger.error(f"QR generation stego error: {str(e)}")
+        if e.error_code in (QRErrorCode.CAPACITY_EXCEEDED, QRErrorCode.QR_INVALID):
+            return jsonify({'error': str(e)}), 400
+        safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
+        return jsonify({'error': safe_error}), 400
     except ValueError as e:
         logger.error(f"QR generation error: {str(e)}")
         safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
@@ -792,7 +798,7 @@ def download_qr_code(download_id):
         if not re.match(r'^[A-Za-z0-9_-]{22}_qr\.png$', download_id):
             return jsonify({'error': 'Invalid download ID'}), 400
 
-        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], download_id)
+        file_path = os.path.abspath(os.path.join(current_app.config['UPLOAD_FOLDER'], download_id))
         
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
@@ -821,25 +827,88 @@ def scan_qr_code():
     """
     qr_path = None
     try:
+        # Generate unique non-sensitive scan trace ID
+        camera_scan_id = secrets.token_hex(4)
+
         # Validate request
         qr_image = request.files.get('image')
         password = request.form.get('password') or None
-        raw_qr_data = request.form.get('raw_qr_data') or None
+        raw_qr_data = request.form.get('raw_qr_data') or request.form.get('rawQrData') or None
+        corners_raw = request.form.get('corners') or None
+        version_raw = request.form.get('version') or None
+
+        client_corners = None
+        if corners_raw:
+            try:
+                client_corners = json.loads(corners_raw) if isinstance(corners_raw, str) else corners_raw
+            except (json.JSONDecodeError, TypeError, ValueError) as err:
+                logger.warning(f"QR scan [{camera_scan_id}]: Failed to parse client corners: {err}")
+
+        client_version = None
+        if version_raw is not None:
+            try:
+                client_version = int(version_raw)
+            except (ValueError, TypeError):
+                pass
         
-        logger.info(f'QR scan: Request received, password provided: {password is not None}, raw_data provided: {raw_qr_data is not None}')
+        logger.info(
+            f"QR scan [{camera_scan_id}]: Request received. password={password is not None}, "
+            f"raw_data={raw_qr_data is not None}, client_corners={client_corners is not None}, "
+            f"client_version={client_version}"
+        )
         
         if not qr_image:
-            logger.warning('QR scan: No image provided in request')
-            return jsonify({'error': 'QR code image is required'}), 400
+            logger.warning(f"QR scan [{camera_scan_id}]: No image provided in request")
+            return jsonify({'error': 'QR code image is required', 'cameraScanId': camera_scan_id, 'failureReason': 'NO_QR'}), 400
         
         validate_image(qr_image)
-        logger.debug('QR scan: Image validation passed')
+        logger.debug(f"QR scan [{camera_scan_id}]: Image validation passed")
+
+        # Ephemeral debug frame capture per scan (strictly development only)
+        debug_capture_enabled = os.getenv("DEBUG_CAMERA_CAPTURE", "false").strip().lower() == "true"
+        if debug_capture_enabled:
+            try:
+                debug_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], "debug")
+                os.makedirs(debug_dir, exist_ok=True)
+                debug_img_path = os.path.join(debug_dir, f"debug_camera_{camera_scan_id}.png")
+                debug_meta_path = os.path.join(debug_dir, f"debug_camera_{camera_scan_id}.json")
+                latest_img_path = os.path.join(debug_dir, "debug_camera_latest.png")
+                latest_meta_path = os.path.join(debug_dir, "debug_camera_latest.json")
+
+                qr_image.seek(0)
+                img_content = qr_image.read()
+                qr_image.seek(0)
+
+                with open(debug_img_path, "wb") as f_dbg:
+                    f_dbg.write(img_content)
+                with open(latest_img_path, "wb") as f_latest:
+                    f_latest.write(img_content)
+
+                meta_content = {
+                    "camera_scan_id": camera_scan_id,
+                    "timestamp": time.time(),
+                    "raw_qr_data": raw_qr_data,
+                    "client_version": client_version,
+                    "corners": client_corners,
+                }
+                with open(debug_meta_path, "w", encoding="utf-8") as f_meta:
+                    json.dump(meta_content, f_meta, indent=2)
+                with open(latest_meta_path, "w", encoding="utf-8") as f_meta_latest:
+                    json.dump(meta_content, f_meta_latest, indent=2)
+
+                logger.debug("QR scan [%s]: Saved ephemeral debug frame to %s", camera_scan_id, debug_img_path)
+            except Exception as d_err:
+                logger.warning("QR scan [%s]: Failed to save debug camera capture: %s", camera_scan_id, d_err)
 
         # Burst deduplication cache check (prevents camera frame spam from burning CPU)
         img_bytes = qr_image.read()
         qr_image.seek(0)
         cache_key = hashlib.sha256(
-            img_bytes + (password or "").encode("utf-8") + (raw_qr_data or "").encode("utf-8")
+            img_bytes
+            + (password or "").encode("utf-8")
+            + (raw_qr_data or "").encode("utf-8")
+            + (str(corners_raw or "")).encode("utf-8")
+            + (str(version_raw or "")).encode("utf-8")
         ).hexdigest()
         now = time.time()
 
@@ -852,9 +921,10 @@ def scan_qr_code():
             if cache_key in qr_detection_cache:
                 cached_time, cached_payload = qr_detection_cache[cache_key]
                 if now - cached_time < 2.0:
-                    logger.debug("QR scan: Deduplication cache hit for key %s...", cache_key[:8])
+                    logger.debug("QR scan [%s]: Deduplication cache hit for key %s...", camera_scan_id, cache_key[:8])
                     status_code = cached_payload.get('_status_code', 200)
                     resp = {k: v for k, v in cached_payload.items() if k != '_status_code'}
+                    resp['cameraScanId'] = camera_scan_id
                     return jsonify(resp), status_code
 
         # Save image temporarily
@@ -864,21 +934,35 @@ def scan_qr_code():
         qr_filename = secure_filename(qr_image.filename)
         qr_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{qr_filename}")
         qr_image.save(qr_path)
-        logger.debug(f'QR scan: Saved image to {qr_path}')
+        logger.debug(f'QR scan [{camera_scan_id}]: Saved image to {qr_path}')
 
         # Extract both public and secret data
-        logger.info('QR scan: Extracting data from QR code...')
+        logger.info(f'QR scan [{camera_scan_id}]: Extracting data from QR code...')
+        debug_sink: Dict[str, Any] = {"cameraScanId": camera_scan_id}
         public_data, secret_data = extract_from_qr_stego(
-            qr_path, password=password, raw_qr_text=raw_qr_data
+            qr_path,
+            password=password,
+            raw_qr_text=raw_qr_data,
+            client_corners=client_corners,
+            client_version=client_version,
+            debug_info=debug_sink,
         )
 
-        logger.info(f'QR scan: Successfully extracted data. Public data length: {len(public_data)}, Secret data present: {bool(secret_data)}')
+        logger.info(
+            f"QR scan [{camera_scan_id}]: Extraction completed. "
+            f"Public data length: {len(public_data)}, Secret present: {bool(secret_data)}, "
+            f"Geometry: {debug_sink.get('geometrySource')}, Failure reason: {debug_sink.get('failureReason')}"
+        )
         resp_data = {
             'success': True,
+            'cameraScanId': camera_scan_id,
             'publicData': public_data,
             'secretData': secret_data,
             'hasPassword': password is not None
         }
+
+        if current_app.config.get('DEBUG') or debug_capture_enabled:
+            resp_data['debug'] = debug_sink
 
         with _qr_cache_lock:
             qr_detection_cache[cache_key] = (now, resp_data)
@@ -888,13 +972,20 @@ def scan_qr_code():
         return jsonify(resp_data), 200
 
     except ValueError as e:
-        logger.error(f'QR scan: Validation error - {str(e)}')
+        logger.error(f"QR scan: Validation error - {str(e)}")
         safe_error = sanitize_error(str(e), current_app.config['DEBUG'])
 
-        err_data = {'error': safe_error, '_status_code': 400}
+        err_data = {
+            'error': safe_error,
+            '_status_code': 400,
+            'cameraScanId': locals().get('camera_scan_id', 'unknown')
+        }
         if 'password' in str(e).lower():
             logger.warning('QR scan: Password required but not provided or incorrect')
             err_data['passwordRequired'] = True
+            err_data['failureReason'] = 'WRONG_PASSWORD'
+        else:
+            err_data['failureReason'] = locals().get('debug_sink', {}).get('failureReason', 'EXTRACTION_EXCEPTION')
 
         if 'cache_key' in locals():
             with _qr_cache_lock:
@@ -903,9 +994,14 @@ def scan_qr_code():
         resp = {k: v for k, v in err_data.items() if k != '_status_code'}
         return jsonify(resp), 400
     except Exception as e:
-        logger.error(f'QR scan: Unexpected error - {str(e)}', exc_info=True)
+        logger.error(f"QR scan: Unexpected error - {str(e)}", exc_info=True)
         safe_error = sanitize_error('An error occurred while scanning the QR code', current_app.config['DEBUG'])
-        return jsonify({'error': safe_error}), 500
+        return jsonify({
+            'error': safe_error,
+            'cameraScanId': locals().get('camera_scan_id', 'unknown'),
+            'failureReason': 'EXTRACTION_EXCEPTION',
+            'exceptionType': type(e).__name__ if current_app.config.get('DEBUG') else None
+        }), 500
     finally:
         # Final cleanup in case of early exit
         if qr_path and os.path.exists(qr_path):
