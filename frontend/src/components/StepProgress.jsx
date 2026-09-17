@@ -1,7 +1,7 @@
 import { Check } from 'lucide-react'
 import './StepProgress.css'
 
-function StepProgress({ steps = [], currentStep = 1, className = '' }) {
+function StepProgress({ steps = [], currentStep = 1, isComplete = false, className = '' }) {
   if (!steps || steps.length === 0) return null
 
   // Normalize steps to { id, label }
@@ -24,8 +24,8 @@ function StepProgress({ steps = [], currentStep = 1, className = '' }) {
       <ol className="step-list desktop-steps">
         {normalizedSteps.map((step, index) => {
           const stepNum = index + 1
-          const isCompleted = stepNum < currentStep
-          const isCurrent = stepNum === currentStep
+          const isCompleted = isComplete ? stepNum <= currentStep : stepNum < currentStep
+          const isCurrent = !isComplete && stepNum === currentStep
 
           let stepStatusClass = 'upcoming'
           if (isCompleted) stepStatusClass = 'completed'
@@ -43,7 +43,7 @@ function StepProgress({ steps = [], currentStep = 1, className = '' }) {
                 </span>
                 {index < normalizedSteps.length - 1 && (
                   <div
-                    className={`step-connector ${stepNum < currentStep ? 'completed' : ''}`}
+                    className={`step-connector ${isComplete || stepNum < currentStep ? 'completed' : ''}`}
                     aria-hidden="true"
                   />
                 )}

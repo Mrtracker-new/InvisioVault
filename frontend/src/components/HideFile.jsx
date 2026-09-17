@@ -188,7 +188,7 @@ function HideFile() {
       </p>
 
       {/* Visual Step Progression */}
-      <StepProgress steps={STEPS} currentStep={getCurrentStep()} />
+      <StepProgress steps={STEPS} currentStep={getCurrentStep()} isComplete={success} />
 
       {!success ? (
         <form onSubmit={handleSubmit}>

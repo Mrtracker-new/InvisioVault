@@ -256,7 +256,7 @@ function Polyglot() {
       {mode === 'create' ? (
         <div id="polyglot-panel-create" role="tabpanel" aria-labelledby="polyglot-tab-create">
           {/* Step Progress for Polyglot Creation */}
-          <StepProgress steps={CREATE_STEPS} currentStep={getCreateStep()} />
+          <StepProgress steps={CREATE_STEPS} currentStep={getCreateStep()} isComplete={success} />
 
           {!success ? (
             <form onSubmit={handleCreate}>
@@ -436,7 +436,7 @@ function Polyglot() {
       ) : (
         <div id="polyglot-panel-extract" role="tabpanel" aria-labelledby="polyglot-tab-extract">
           {/* Step Progress for Polyglot Extraction */}
-          <StepProgress steps={EXTRACT_STEPS} currentStep={getExtractStep()} />
+          <StepProgress steps={EXTRACT_STEPS} currentStep={getExtractStep()} isComplete={extractSuccess} />
 
           <form onSubmit={handleExtract}>
             <FileDropzone

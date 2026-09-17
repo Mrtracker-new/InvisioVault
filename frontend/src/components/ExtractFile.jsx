@@ -149,7 +149,7 @@ function ExtractFile() {
       </p>
 
       {/* Visual Step Progression */}
-      <StepProgress steps={STEPS} currentStep={getCurrentStep()} />
+      <StepProgress steps={STEPS} currentStep={getCurrentStep()} isComplete={Boolean(extractedText || successMessage)} />
 
       {extractedText ? (
         <div className="text-display">
