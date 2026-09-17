@@ -65,7 +65,7 @@ _IMAGE_MAGIC = {
 def validate_file(
     file: FileStorage,
     allowed_extensions: set,
-    max_size: int = None,
+    max_size: int | None = None,
 ) -> None:
     """Validate an uploaded file's name, extension, and size.
 
@@ -146,6 +146,7 @@ def validate_image(file: FileStorage, max_size: int = MAX_IMAGE_SIZE) -> None:
     # ── 1. Extension + size ──────────────────────────────────────────────
     validate_file(file, ALLOWED_IMAGE_EXTENSIONS, max_size)
 
+    assert file.filename is not None  # guaranteed: validate_file raises if filename is missing
     extension = file.filename.rsplit('.', 1)[1].lower()
 
     # ── 2. Magic-byte verification ───────────────────────────────────────
@@ -201,9 +202,10 @@ def validate_image(file: FileStorage, max_size: int = MAX_IMAGE_SIZE) -> None:
             f"({MAX_PIXEL_COUNT // 1_000_000} megapixels). "
             f"Please use a smaller image."
         )
-    except (Image.UnidentifiedImageError, SyntaxError):
-        # SyntaxError is raised by some Pillow format parsers on
-        # malformed headers (e.g. truncated PNG IHDR).
+    except (Image.UnidentifiedImageError, SyntaxError, OSError):
+        # SyntaxError: malformed headers (e.g. truncated PNG IHDR).
+        # OSError: raised by some Pillow parsers when the stream ends
+        # prematurely mid-verify (e.g. truncated JPEG with valid SOI).
         raise ValueError(
             "The file could not be parsed as a valid image. "
             "It may be corrupted or not a genuine image file."

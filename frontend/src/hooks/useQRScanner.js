@@ -5,6 +5,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import jsQR from 'jsqr'
 
+// Only emit verbose logs in development builds (Vite strips import.meta.env.DEV in production)
+const DEV = import.meta.env.DEV
+
 export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) {
     const videoRef = useRef(null)
     const canvasRef = useRef(null)
@@ -122,14 +125,16 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
                     }
                     const dpr = window.devicePixelRatio || 1
 
-                    console.log('[QR Scanner] QR Code detected locally:', code.data)
-                    console.log('[QR Scanner] Camera & Canvas Metrics:', {
-                        video: videoDims,
-                        canvas: canvasDims,
-                        devicePixelRatio: dpr,
-                        version: code.version,
-                        location: code.location
-                    })
+                    if (DEV) {
+                        console.log('[QR Scanner] QR Code detected locally:', code.data)
+                        console.log('[QR Scanner] Camera & Canvas Metrics:', {
+                            video: videoDims,
+                            canvas: canvasDims,
+                            devicePixelRatio: dpr,
+                            version: code.version,
+                            location: code.location
+                        })
+                    }
 
                     lastScannedDataRef.current = code.data
                     lastScannedTimeRef.current = now
@@ -270,14 +275,16 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
                     const targetCanvas = workCanvas
                     targetCanvas.toBlob((blob) => {
                         if (blob) {
-                            console.log('[QR Scanner] Cropped+sharpened blob:', {
-                                type: blob.type,
-                                size: blob.size,
-                                cropW, cropH,
-                                originalW: snapshotCanvas.width,
-                                originalH: snapshotCanvas.height,
-                                ratio: Math.round((1 - blob.size / (snapshotCanvas.width * snapshotCanvas.height * 0.75)) * 100) + '% smaller'
-                            })
+                            if (DEV) {
+                                console.log('[QR Scanner] Cropped+sharpened blob:', {
+                                    type: blob.type,
+                                    size: blob.size,
+                                    cropW, cropH,
+                                    originalW: snapshotCanvas.width,
+                                    originalH: snapshotCanvas.height,
+                                    ratio: Math.round((1 - blob.size / (snapshotCanvas.width * snapshotCanvas.height * 0.75)) * 100) + '% smaller'
+                                })
+                            }
                             Promise.resolve(onQRDetectedRef.current({
                                 blob,
                                 rawQrData: code.data,
@@ -317,7 +324,7 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
 
     const startScanning = useCallback(async () => {
         try {
-            console.log('[QR Scanner] Starting camera access...')
+            if (DEV) console.log('[QR Scanner] Starting camera access...')
             setError(null)
             setBoundingBox(null)
 
@@ -360,7 +367,7 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
                 throw lastError || new Error('Failed to get camera stream')
             }
 
-            console.log('[QR Scanner] Camera access granted')
+            if (DEV) console.log('[QR Scanner] Camera access granted')
             streamRef.current = stream
 
             if (videoRef.current) {
@@ -390,7 +397,7 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
     }, [scanFrame])
 
     useEffect(() => {
-        console.log('[QR Scanner] Hook activated:', isActive)
+        if (DEV) console.log('[QR Scanner] Hook activated:', isActive)
 
         if (!isActive) {
             stopScanning()
@@ -400,7 +407,7 @@ export function useQRScanner(isActive, onQRDetected, onError, isPaused = false) 
         startScanning()
 
         return () => {
-            console.log('[QR Scanner] Cleaning up...')
+            if (DEV) console.log('[QR Scanner] Cleaning up...')
             stopScanning()
         }
     }, [isActive, startScanning, stopScanning])

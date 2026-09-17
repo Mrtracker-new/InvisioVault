@@ -96,6 +96,7 @@ from cryptography.fernet import Fernet
 import itertools
 import gc
 import numpy as np
+from typing import Optional, cast
 
 from utils.crypto_utils import derive_fernet_key
 
@@ -176,12 +177,13 @@ _derive_key_from_password = derive_fernet_key
 def _iter_lsb_bytes(img: Image.Image):
     """Yield each LSB byte extracted from the RGB channels sequentially."""
     px = img.load()
+    assert px is not None, "img.load() returned None — image may have no pixels"
     width, height = img.width, img.height
     byte = 0
     bit_count = 0
     for y in range(height):
         for x in range(width):
-            pixel = px[x, y]
+            pixel = cast(tuple[int, ...], px[x, y])  # always RGB tuple; Pillow stubs over-approximate to float
             for ch in pixel[:3]:
                 byte = (byte << 1) | (ch & 1)
                 bit_count += 1
@@ -241,6 +243,7 @@ def _ecc_encode(data: bytes) -> bytes:
     """Vectorized Reed-Solomon encoding with bit-for-bit equivalence to reedsolo."""
     if not _ECC_AVAILABLE or _rs_32 is None or len(data) == 0:
         return data
+    assert _GEN_LUT is not None  # set alongside _rs_32; guaranteed by _ECC_AVAILABLE guard
     ksize = 223
     n = len(data)
     m = n // ksize
@@ -276,6 +279,7 @@ def _ecc_decode(data: bytes) -> bytes:
     """Vectorized syndrome evaluation for fast clean decode, with reedsolo fallback."""
     if not _ECC_AVAILABLE or _rs_32 is None or len(data) == 0:
         return data
+    assert _SYN_MUL is not None  # set alongside _rs_32; guaranteed by _ECC_AVAILABLE guard
     n = len(data)
     if n <= 32:
         try:
@@ -323,7 +327,12 @@ def _ecc_decode(data: bytes) -> bytes:
             full_chunks = np.frombuffer(data[:m * chunksize], dtype=np.uint8).reshape(m, chunksize)
             parts.append(full_chunks[:, :223].tobytes())
         if remainder > 0:
-            parts.append(data[m * chunksize : n - 32])
+            # The remainder chunk is `remainder` bytes total.
+            # reedsolo appends exactly 32 ECC bytes at its end, so the
+            # data payload in this chunk is bytes [0 : remainder - 32].
+            rem_data_len = remainder - 32
+            if rem_data_len > 0:
+                parts.append(data[m * chunksize : m * chunksize + rem_data_len])
         return b"".join(parts)
 
     # Fallback path: one or more blocks has non-zero syndromes; repair with reedsolo
@@ -543,7 +552,7 @@ def hide_file_in_image(
     image_path: str,
     file_path: str,
     output_path: str,
-    password: str = None,
+    password: Optional[str] = None,
     original_filename: str | None = None,
 ) -> str:
     """Hide a file using detection‑resistant steganography (new adaptive writer).
@@ -695,6 +704,7 @@ def hide_file_in_image(
     # ── 9. Reassemble and save with original PNG metadata ─────────────────────
     out_rgb = flat.reshape(height, width, 3)
     if has_alpha:
+        assert alpha_arr is not None  # set in the has_alpha branch above
         out_arr = np.dstack([out_rgb, alpha_arr])
         host_img = Image.fromarray(out_arr, "RGBA")
     else:
@@ -702,7 +712,7 @@ def hide_file_in_image(
 
     pnginfo = PngImagePlugin.PngInfo()
     for k, v in original_info.items():
-        if isinstance(v, str):
+        if isinstance(k, str) and isinstance(v, str):
             pnginfo.add_text(k, v, zip=False)
     exif = original_info.get("exif")
 
@@ -721,7 +731,7 @@ def hide_file_in_image(
 
 def extract_file_from_image(
     image_path: str,
-    password: str = None,
+    password: Optional[str] = None,
 ) -> tuple[bytes, str, str]:
     """Extract a hidden file (transparent v1/v2/v3/v4 support)."""
     # Normalize to RGB: the hide path always writes RGB/RGBA PNGs, but a
@@ -818,6 +828,7 @@ def extract_file_from_image(
                 flat = rgb_arr.reshape(-1)
                 scores = _v4_edge_scores(rgb_arr)     # LSB-invariant, same as embed
                 payload_bits = data_length * 8
+                assert threshold is not None, "threshold must be set for fast-path v4 extraction"
                 eligible = _v4_eligible_channels(scores, threshold, header_bits, total_channels)
                 del scores
                 gc.collect()
@@ -837,6 +848,7 @@ def extract_file_from_image(
             elif is_random_embed and data_length > 0:
                 # ── v3 / legacy random path: pure-Python Feistel walk ─────────
                 px = img.load()  # we need pixel access for edge scores and bit extraction
+                assert px is not None, "img.load() returned None — image may have no pixels"
                 scores = _compute_edge_scores(px, width, height)
                 if not (is_new_adaptive and threshold is not None):
                     # Old random flags: recompute threshold from image
@@ -860,7 +872,7 @@ def extract_file_from_image(
                     pixel_idx = abs_ch // 3
                     ch_idx = abs_ch % 3
                     if scores[pixel_idx] >= threshold:
-                        pix = px[pixel_idx % width, pixel_idx // width]
+                        pix = cast(tuple[int, ...], px[pixel_idx % width, pixel_idx // width])
                         bit = pix[ch_idx] & 1
                         byte_idx = bits_read // 8
                         bit_pos = 7 - (bits_read % 8)
@@ -906,6 +918,7 @@ def extract_file_from_image(
         # ── Decrypt if needed ─────────────────────────────────────────────────
         if has_password:
             try:
+                assert password is not None  # guaranteed: has_password flag is only set when password was provided
                 key = _derive_key_from_password(password, salt)
                 fernet = Fernet(key)
                 metadata_plain = fernet.decrypt(metadata_bytes)

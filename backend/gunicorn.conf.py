@@ -25,10 +25,13 @@ workers = 1
 # probes arriving while a file-hide operation is in progress).
 threads = 2
 
-# Defensive worker recycling to prevent any subtle C-extension heap fragmentation
+# Defensive worker recycling to prevent subtle C-extension heap fragmentation
 # over long runtimes in Render's 512 MB container.
-max_requests = 250
-max_requests_jitter = 25
+# 1000 requests gives enough headroom to avoid recycling mid-session while still
+# clearing any gradual GF(256) LUT/malloc fragmentation over time.
+# Jitter of 50 spreads restarts so two threads don't both recycle simultaneously.
+max_requests = 1000
+max_requests_jitter = 50
 
 # Request timeout in seconds. Image processing can be slow on the free tier.
 timeout = 120

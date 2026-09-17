@@ -266,6 +266,7 @@ def hide_file():
         # Pre-validation: format, magic, dimensions, and size checks before acquiring lock
         validate_image(image)
         if not text_to_hide:
+            assert file_to_hide is not None  # guaranteed by the check at line 259
             validate_hideable_file(file_to_hide)
 
         # Concurrency protection: acquire bounded semaphore for heavy steganography encode
@@ -281,7 +282,7 @@ def hide_file():
             upload_folder = current_app.config['UPLOAD_FOLDER']
             os.makedirs(upload_folder, exist_ok=True)
             
-            image_filename = secure_filename(image.filename)
+            image_filename = secure_filename(image.filename or "")
             image_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{image_filename}")
             image.save(image_path)
             
@@ -293,7 +294,8 @@ def hide_file():
                     f.write(text_to_hide)
                 clean_original_filename = "hidden_text.txt"
             else:
-                file_filename = _safe_upload_name(file_to_hide.filename)
+                assert file_to_hide is not None  # guaranteed by the check at line 259
+                file_filename = _safe_upload_name(file_to_hide.filename or "")
                 file_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{file_filename}")
                 file_to_hide.save(file_path)
                 clean_original_filename = file_filename
@@ -392,7 +394,7 @@ def extract_file():
             upload_folder = current_app.config['UPLOAD_FOLDER']
             os.makedirs(upload_folder, exist_ok=True)
             
-            image_filename = secure_filename(image.filename)
+            image_filename = secure_filename(image.filename or "")
             image_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{image_filename}")
             image.save(image_path)
 
@@ -733,7 +735,7 @@ def generate_qr_code():
         if logo_file:
             try:
                 validate_image(logo_file)
-                logo_filename = secure_filename(logo_file.filename)
+                logo_filename = secure_filename(logo_file.filename or "")
                 logo_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{logo_filename}")
                 logo_file.save(logo_path)
             except ValueError:
@@ -826,9 +828,13 @@ def scan_qr_code():
     while accommodating legitimate multi-scan workflows.
     """
     qr_path = None
+    cache_key: str | None = None  # set after image hash; None means cache wasn't reached
+    debug_sink: Dict[str, Any] = {}  # initialised early so except handler can read it
+    debug_capture_enabled = os.getenv("DEBUG_CAMERA_CAPTURE", "false").strip().lower() == "true"
     try:
         # Generate unique non-sensitive scan trace ID
         camera_scan_id = secrets.token_hex(4)
+        debug_sink["cameraScanId"] = camera_scan_id
 
         # Validate request
         qr_image = request.files.get('image')
@@ -865,7 +871,6 @@ def scan_qr_code():
         logger.debug(f"QR scan [{camera_scan_id}]: Image validation passed")
 
         # Ephemeral debug frame capture per scan (strictly development only)
-        debug_capture_enabled = os.getenv("DEBUG_CAMERA_CAPTURE", "false").strip().lower() == "true"
         if debug_capture_enabled:
             try:
                 debug_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], "debug")
@@ -875,9 +880,9 @@ def scan_qr_code():
                 latest_img_path = os.path.join(debug_dir, "debug_camera_latest.png")
                 latest_meta_path = os.path.join(debug_dir, "debug_camera_latest.json")
 
-                qr_image.seek(0)
-                img_content = qr_image.read()
-                qr_image.seek(0)
+                qr_image.stream.seek(0)
+                img_content = qr_image.stream.read()
+                qr_image.stream.seek(0)
 
                 with open(debug_img_path, "wb") as f_dbg:
                     f_dbg.write(img_content)
@@ -907,8 +912,8 @@ def scan_qr_code():
             img_bytes
             + (password or "").encode("utf-8")
             + (raw_qr_data or "").encode("utf-8")
-            + (str(corners_raw or "")).encode("utf-8")
-            + (str(version_raw or "")).encode("utf-8")
+            + (corners_raw or "").encode("utf-8")
+            + (version_raw or "").encode("utf-8")
         ).hexdigest()
         now = time.time()
 
@@ -931,14 +936,13 @@ def scan_qr_code():
         upload_folder = current_app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
 
-        qr_filename = secure_filename(qr_image.filename)
+        qr_filename = secure_filename(qr_image.filename or "")
         qr_path = os.path.join(upload_folder, f"{secrets.token_hex(8)}_{qr_filename}")
         qr_image.save(qr_path)
         logger.debug(f'QR scan [{camera_scan_id}]: Saved image to {qr_path}')
 
         # Extract both public and secret data
         logger.info(f'QR scan [{camera_scan_id}]: Extracting data from QR code...')
-        debug_sink: Dict[str, Any] = {"cameraScanId": camera_scan_id}
         public_data, secret_data = extract_from_qr_stego(
             qr_path,
             password=password,
@@ -953,7 +957,7 @@ def scan_qr_code():
             f"Public data length: {len(public_data)}, Secret present: {bool(secret_data)}, "
             f"Geometry: {debug_sink.get('geometrySource')}, Failure reason: {debug_sink.get('failureReason')}"
         )
-        resp_data = {
+        resp_data: Dict[str, Any] = {
             'success': True,
             'cameraScanId': camera_scan_id,
             'publicData': public_data,
@@ -961,13 +965,15 @@ def scan_qr_code():
             'hasPassword': password is not None
         }
 
-        if current_app.config.get('DEBUG') or debug_capture_enabled:
-            resp_data['debug'] = debug_sink
-
         with _qr_cache_lock:
-            qr_detection_cache[cache_key] = (now, resp_data)
+            # Cache only the non-debug fields — debug trace belongs to this
+            # specific request and must not be served to other callers via cache.
+            qr_detection_cache[cache_key] = (now, resp_data.copy())
             while len(qr_detection_cache) > _QR_CACHE_MAX:
                 qr_detection_cache.popitem(last=False)
+
+        if current_app.config.get('DEBUG') or debug_capture_enabled:
+            resp_data['debug'] = debug_sink
 
         return jsonify(resp_data), 200
 
@@ -978,16 +984,16 @@ def scan_qr_code():
         err_data = {
             'error': safe_error,
             '_status_code': 400,
-            'cameraScanId': locals().get('camera_scan_id', 'unknown')
+            'cameraScanId': debug_sink.get('cameraScanId', 'unknown')
         }
         if 'password' in str(e).lower():
             logger.warning('QR scan: Password required but not provided or incorrect')
             err_data['passwordRequired'] = True
             err_data['failureReason'] = 'WRONG_PASSWORD'
         else:
-            err_data['failureReason'] = locals().get('debug_sink', {}).get('failureReason', 'EXTRACTION_EXCEPTION')
+            err_data['failureReason'] = debug_sink.get('failureReason', 'EXTRACTION_EXCEPTION')
 
-        if 'cache_key' in locals():
+        if cache_key is not None:
             with _qr_cache_lock:
                 qr_detection_cache[cache_key] = (time.time(), err_data)
 
@@ -998,7 +1004,7 @@ def scan_qr_code():
         safe_error = sanitize_error('An error occurred while scanning the QR code', current_app.config['DEBUG'])
         return jsonify({
             'error': safe_error,
-            'cameraScanId': locals().get('camera_scan_id', 'unknown'),
+            'cameraScanId': debug_sink.get('cameraScanId', 'unknown'),
             'failureReason': 'EXTRACTION_EXCEPTION',
             'exceptionType': type(e).__name__ if current_app.config.get('DEBUG') else None
         }), 500
