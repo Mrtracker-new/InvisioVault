@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { QrCode, Sparkles, ScanLine, Sliders, Lock, AlertTriangle, ShieldCheck, ShieldAlert, ShieldX, CheckCircle2, Download, Smartphone, Camera, Upload, RotateCcw, AlertCircle, Globe, Check, Copy, Info, Eye, EyeOff } from 'lucide-react'
 import axios from 'axios'
 import './QRCode.css'
@@ -24,7 +24,7 @@ const QR_EXTRACT_STEPS = [
 
 function QRCode() {
     const [activeTab, setActiveTab] = useState('generate') // 'generate' or 'extract'
-    const [scanMode, setScanMode] = useState('camera') // 'camera' or 'upload'
+    const [scanMode, setScanMode] = useState('upload') // 'upload' (recommended for visual stego) or 'camera'
 
     // Generation state
     const [publicData, setPublicData] = useState('')
@@ -35,7 +35,6 @@ function QRCode() {
     const [fgColor, setFgColor] = useState('#000000')
     const [bgColor, setBgColor] = useState('#FFFFFF')
     const [scale, setScale] = useState(20) // Increased to 20 for better scannability
-    const [stegoMethod, setStegoMethod] = useState('stream') // 'stream' (Robust) or 'visual' (Stealth)
     const [logo, setLogo] = useState(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
@@ -53,9 +52,13 @@ function QRCode() {
     const [extractError, setExtractError] = useState('')
     const [cameraError, setCameraError] = useState('')
     const [copiedField, setCopiedField] = useState('')
+    const [pendingScan, setPendingScan] = useState(null)
+    const emptyFrameRetriesRef = useRef(0)
 
-    // Camera scanner with callbacks: Stop streaming when data is extracted or tab/mode inactive
-    const isScanning = activeTab === 'extract' && scanMode === 'camera' && !extractedData
+    // Camera scanner state: Keep camera active while on camera tab without extracted data,
+    // but pause frame processing if a scan is pending password entry or in-flight.
+    const isCameraActive = activeTab === 'extract' && scanMode === 'camera' && !extractedData
+    const isScannerPaused = Boolean(pendingScan || extractLoading)
 
     const MIN_PASSWORD_LENGTH = 8
 
@@ -82,20 +85,35 @@ function QRCode() {
         }
     }
 
-    const handleQRDetected = async ({ blob, rawQrData }) => {
-        // QR detected from camera - now extract hidden data
-        // rawQrData contains the decoded QR string from the client-side jsQR scan;
-        // it is available for future use but the server re-derives it from the image.
-        console.log('[QRCode Component] QR detected from camera, extracting data...', rawQrData)
+    const handleQRDetected = async ({ blob, rawQrData, corners, version, metrics }) => {
+        if (pendingScan || extractLoading) {
+            console.log('[QRCode Component] Camera detection ignored because scan is pending password or in-flight.')
+            return
+        }
+
+        console.log('[QRCode Component] QR detected from camera, extracting data...', {
+            rawQrData,
+            corners,
+            version,
+            metrics
+        })
         try {
             setExtractLoading(true)
             setExtractError('')
 
             const formData = new FormData()
-            formData.append('image', blob, 'scanned-qr.png')
+            formData.append('image', blob, 'scanned-qr.jpg')
 
             if (rawQrData) {
                 formData.append('raw_qr_data', rawQrData)
+            }
+
+            if (corners) {
+                formData.append('corners', JSON.stringify(corners))
+            }
+
+            if (version !== undefined && version !== null) {
+                formData.append('version', String(version))
             }
 
             if (extractPassword) {
@@ -103,27 +121,121 @@ function QRCode() {
                 formData.append('password', extractPassword)
             }
 
-            console.log('[QRCode Component] Sending to /api/qr/scan...')
+            console.log('[QRCode Component] Sending to /api/qr/scan with fields:', {
+                rawQrData,
+                version,
+                corners,
+                blobType: blob?.type,
+                blobSize: blob?.size,
+            })
             const response = await axios.post(`${API_URL}/api/qr/scan`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data'
                 }
             })
 
-            console.log('[QRCode Component] Extraction successful:', response.data)
+            console.log('[QRCode Component] Extraction response:', {
+                cameraScanId: response.data.cameraScanId,
+                publicData: response.data.publicData,
+                hasSecret: !!response.data.secretData,
+                debug: response.data.debug
+            })
+
+            // If the user has entered a password beforehand, but this particular camera frame
+            // did not decode secret data (e.g. optical blur), continue scanning rather than
+            // prematurely locking the UI into "no hidden data".
+            if (extractPassword && !response.data.secretData) {
+                console.log('[QRCode Component] Password provided but frame did not yield secret, continuing scan...')
+                setExtractError('Scanning for encrypted secret... Please hold camera steady.')
+                return
+            }
+
+            // On live camera streams, allow up to 3 retry frames if no secret was detected yet,
+            // giving the camera focus and sensor auto-exposure a moment to settle.
+            if (!response.data.secretData && scanMode === 'camera' && emptyFrameRetriesRef.current < 3) {
+                emptyFrameRetriesRef.current += 1
+                console.log(`[QRCode Component] Frame did not yield secret, retrying (${emptyFrameRetriesRef.current}/3)...`)
+                setExtractError('Scanning for hidden message... Please hold camera steady.')
+                return
+            }
+
+            emptyFrameRetriesRef.current = 0
+            setPendingScan(null)
             setExtractedData({
                 publicData: response.data.publicData,
                 secretData: response.data.secretData
             })
         } catch (err) {
-            console.error('[QRCode Component] Extraction error:', err)
-            const errorMsg = err.response?.data?.error || 'An error occurred while scanning the QR code'
-            setExtractError(errorMsg)
+            const scanId = err.response?.data?.cameraScanId || 'unknown'
+            const failureReason = err.response?.data?.failureReason
+            const isPwdRequired = !!err.response?.data?.passwordRequired
+            console.error(`[QRCode Component] Extraction error [${scanId}] reason=${failureReason}:`, err)
 
-            // Check if password is required
-            if (err.response?.data?.passwordRequired) {
-                setExtractError(errorMsg + ' Please enter the password and try again.')
+            // PAYLOAD_DECODE_FAILED means the magic header was found but body RS-decode failed
+            // due to optical distortion in this particular frame.  Auto-retry on the next frame
+            // rather than surfacing a hard error; the very next frame is often clean enough.
+            if (!isPwdRequired && failureReason === 'PAYLOAD_DECODE_FAILED' && scanMode === 'camera' && emptyFrameRetriesRef.current < 4) {
+                emptyFrameRetriesRef.current += 1
+                console.log(`[QRCode Component] Body decode failed (optical noise), retrying (${emptyFrameRetriesRef.current}/4)...`)
+                setExtractError('Scanning for hidden message... Please hold camera steady.')
+                return
             }
+
+            emptyFrameRetriesRef.current = 0
+            if (isPwdRequired) {
+                setPendingScan({ blob, rawQrData, corners, version })
+                setExtractError('Encrypted secret detected! Please enter the password below and click Unlock.')
+            } else {
+                const errorMsg = err.response?.data?.error || 'An error occurred while scanning the QR code'
+                setExtractError(errorMsg)
+            }
+        } finally {
+            setExtractLoading(false)
+        }
+    }
+
+    const handleUnlockPendingScan = async (e) => {
+        if (e) e.preventDefault()
+        if (!pendingScan) return
+        if (!extractPassword) {
+            setExtractError('Please enter the password to unlock this QR code')
+            return
+        }
+
+        try {
+            setExtractLoading(true)
+            setExtractError('')
+
+            const formData = new FormData()
+            formData.append('image', pendingScan.blob, 'scanned-qr.jpg')
+            if (pendingScan.rawQrData) {
+                formData.append('raw_qr_data', pendingScan.rawQrData)
+            }
+            if (pendingScan.corners) {
+                formData.append('corners', JSON.stringify(pendingScan.corners))
+            }
+            if (pendingScan.version !== undefined && pendingScan.version !== null) {
+                formData.append('version', String(pendingScan.version))
+            }
+            formData.append('password', extractPassword)
+
+            console.log('[QRCode Component] Unlocking pending scan with password...')
+            const response = await axios.post(`${API_URL}/api/qr/scan`, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            })
+
+            setPendingScan(null)
+            setExtractedData({
+                publicData: response.data.publicData,
+                secretData: response.data.secretData
+            })
+        } catch (err) {
+            console.error('[QRCode Component] Unlock error:', err)
+            const errorMsg = err.response?.data?.error || 'Incorrect password or failed to unlock secret'
+            setExtractError(errorMsg)
+            // Note: Keep pendingScan intact so the user can re-try typing their password!
         } finally {
             setExtractLoading(false)
         }
@@ -147,9 +259,10 @@ function QRCode() {
     }
 
     const { videoRef, canvasRef, error: scanError, isScanning: cameraActive, reset: resetScanner, boundingBox, clearCooldown } = useQRScanner(
-        isScanning,
+        isCameraActive,
         handleQRDetected,
-        handleScanError
+        handleScanError,
+        isScannerPaused
     )
 
     const handleGenerate = async (e) => {
@@ -182,7 +295,7 @@ function QRCode() {
             formData.append('fg_color', fgColor)
             formData.append('bg_color', bgColor)
             formData.append('scale', scale)
-            formData.append('method', stegoMethod)
+            formData.append('method', 'visual')
 
             if (password) {
                 formData.append('password', password)
@@ -228,6 +341,24 @@ function QRCode() {
             setError(await getApiErrorMessage(err, 'Failed to download QR code'))
         } finally {
             setDownloading(false)
+        }
+    }
+
+    const handleVerifyInExtractor = async () => {
+        if (!downloadId) return
+        try {
+            const response = await axios.get(`${API_URL}/api/qr/download/${downloadId}`, {
+                responseType: 'blob'
+            })
+            const file = new File([response.data], 'invisiovault_qrcode.png', { type: 'image/png' })
+            setUploadedQR(file)
+            setExtractPassword(password)
+            setActiveTab('extract')
+            setScanMode('upload')
+            setExtractedData(null)
+            setExtractError('')
+        } catch (err) {
+            setError(await getApiErrorMessage(err, 'Failed to load QR code for verification'))
         }
     }
 
@@ -281,7 +412,6 @@ function QRCode() {
         setPublicData('')
         setSecretText('')
         setPassword('')
-        setStegoMethod('stream')
         setLogo(null)
         if (document.getElementById('logo-input')) {
             document.getElementById('logo-input').value = ''
@@ -294,6 +424,8 @@ function QRCode() {
         setExtractedData(null)
         setExtractError('')
         setCameraError('')
+        setPendingScan(null)
+        emptyFrameRetriesRef.current = 0
         if (clearCooldown) clearCooldown()
         resetScanner()
         if (document.getElementById('uploaded-qr-input')) {
@@ -375,67 +507,48 @@ function QRCode() {
 
             {activeTab === 'generate' ? (
                 <div id="qr-panel-generate" role="tabpanel" aria-labelledby="qr-tab-generate" className="qr-generate">
-                    <StepProgress steps={QR_GENERATE_STEPS} currentStep={getGenerateStep()} />
+                    <StepProgress steps={QR_GENERATE_STEPS} currentStep={getGenerateStep()} isComplete={success} />
                     {!success ? (
                         <form onSubmit={handleGenerate}>
                             <div className="form-group">
-                                <label htmlFor="public-data">Public QR Data (visible when scanned)</label>
+                                <label htmlFor="public-data">Public URL</label>
                                 <input
                                     id="public-data"
                                     type="text"
-                                    placeholder="e.g., https://yourwebsite.com or any text"
+                                    placeholder="https://example.com"
                                     value={publicData}
                                     onChange={(e) => setPublicData(e.target.value)}
                                     required
                                 />
-                                <small>This is what people see when they scan your QR code normally</small>
+                                <small>The URL a normal phone camera will open.</small>
                             </div>
 
                             <div className="form-group">
-                                <label htmlFor="secret-text">Secret Message (hidden)</label>
+                                <label htmlFor="secret-text">Secret Message</label>
                                 <textarea
                                     id="secret-text"
-                                    placeholder="Type your secret message here... (e.g., password, API key, secret URL)"
+                                    placeholder="Type your secret message here... (e.g., password, API key, confidential note)"
                                     value={secretText}
                                     onChange={(e) => setSecretText(e.target.value)}
                                     rows="4"
                                     required
                                 />
                                 {secretText && <p className="char-count">Characters: {secretText.length}</p>}
-                                <small>This will be hidden in the QR code using steganography</small>
+                                <small>The hidden message visible only through InvisioVault.</small>
                             </div>
 
                             <div className="form-group">
                                 <label>Steganography Mode</label>
-                                <div className="method-selector-grid">
-                                    <button
-                                        type="button"
-                                        className={`method-card ${stegoMethod === 'stream' ? 'active' : ''}`}
-                                        onClick={() => setStegoMethod('stream')}
-                                    >
-                                        <div className="method-card-header">
-                                            <ShieldCheck size={16} style={{ color: 'var(--accent-primary)' }} />
-                                            <span>Robust Stream</span>
-                                            <span className="method-badge-rec">Recommended</span>
-                                        </div>
-                                        <p className="method-card-desc">
-                                            URL Fragment encoded with Reed-Solomon ECC. Survives camera scans, prints, screenshots, and custom colors.
-                                        </p>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        className={`method-card ${stegoMethod === 'visual' ? 'active' : ''}`}
-                                        onClick={() => setStegoMethod('visual')}
-                                    >
-                                        <div className="method-card-header">
-                                            <EyeOff size={16} style={{ color: 'var(--accent-primary)' }} />
-                                            <span>Stealth Visual</span>
-                                        </div>
-                                        <p className="method-card-desc">
-                                            Embedded in pixel luminance layer. Public barcode displays clean URL only. Best for direct digital PNG file sharing.
-                                        </p>
-                                    </button>
+                                <div className="method-card active" style={{ cursor: 'default' }}>
+                                    <div className="method-card-header">
+                                        <EyeOff size={16} style={{ color: 'var(--accent-success)' }} />
+                                        <span>Stealth Visual</span>
+                                        <span className="method-badge-rec">Recommended</span>
+                                    </div>
+                                    <p className="method-card-desc">
+                                        Normal camera → opens your Public URL<br />
+                                        InvisioVault → reveals your hidden secret
+                                    </p>
                                 </div>
                             </div>
 
@@ -603,20 +716,21 @@ function QRCode() {
                     ) : (
                         <div className="success-card">
                             <div className="success-icon">
-                                <CheckCircle2 size={48} strokeWidth={1.75} />
+                                <CheckCircle2 size={48} strokeWidth={1.75} color="var(--accent-success)" />
                             </div>
                             <h3>QR Code Generated Successfully!</h3>
                             {qrPreview && (
                                 <div className="qr-preview">
                                     <img src={qrPreview} alt="Generated QR Code" />
                                     <div className="preview-hint">
-                                        <p style={{ margin: '4px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                                            <Smartphone size={14} />
-                                            <span>Scan with phone → Shows: {publicData}</span>
+                                        <p>
+                                            <Smartphone size={14} aria-hidden="true" />
+                                            <span>Normal camera opens:</span>
+                                            <span className="preview-url-badge">{publicData}</span>
                                         </p>
-                                        <p style={{ margin: '4px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                                            <ScanLine size={14} />
-                                            <span>Scan with InvisioVault → Also reveals secret message</span>
+                                        <p>
+                                            <ScanLine size={14} aria-hidden="true" />
+                                            <span>InvisioVault reveals hidden secret (Camera Scan or Upload)</span>
                                         </p>
                                     </div>
                                 </div>
@@ -626,35 +740,35 @@ function QRCode() {
                                     {error}
                                 </div>
                             )}
-                            <button type="button" onClick={handleDownload} disabled={downloading} className="download-button">
-                                <Download size={16} aria-hidden="true" />
-                                <span>{downloading ? 'Downloading...' : 'Download QR Code'}</span>
-                            </button>
-                            <button type="button" onClick={resetGenerate} className="new-button">
-                                Create Another QR Code
-                            </button>
+                            <div className="button-group-row">
+                                <button type="button" onClick={handleDownload} disabled={downloading} className="download-button">
+                                    <Download size={16} aria-hidden="true" />
+                                    <span>{downloading ? 'Downloading...' : 'Download QR Code'}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleVerifyInExtractor}
+                                    className="verify-button"
+                                >
+                                    <ScanLine size={16} aria-hidden="true" />
+                                    <span>Verify in Extractor</span>
+                                </button>
+                            </div>
+                            <div style={{ marginTop: 'var(--space-4)', display: 'flex', justifyContent: 'center' }}>
+                                <button type="button" onClick={resetGenerate} className="new-button">
+                                    Create Another QR Code
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
             ) : (
                 <div id="qr-panel-extract" role="tabpanel" aria-labelledby="qr-tab-extract" className="qr-extract">
-                    <StepProgress steps={QR_EXTRACT_STEPS} currentStep={getExtractStep()} />
+                    <StepProgress steps={QR_EXTRACT_STEPS} currentStep={getExtractStep()} isComplete={Boolean(extractedData)} />
                     {!extractedData ? (
                         <div>
                             {/* Scan Mode Toggle */}
                             <div className="scan-mode-toggle" role="tablist" aria-label="Scan Mode">
-                                <button
-                                    id="scan-tab-camera"
-                                    role="tab"
-                                    aria-selected={scanMode === 'camera'}
-                                    aria-controls="scan-panel-camera"
-                                    type="button"
-                                    className={`mode-btn ${scanMode === 'camera' ? 'active' : ''}`}
-                                    onClick={() => setScanMode('camera')}
-                                >
-                                    <Camera size={16} aria-hidden="true" />
-                                    <span>Camera Scan</span>
-                                </button>
                                 <button
                                     id="scan-tab-upload"
                                     role="tab"
@@ -667,38 +781,86 @@ function QRCode() {
                                     <Upload size={16} aria-hidden="true" />
                                     <span>Upload Image</span>
                                 </button>
+                                <button
+                                    id="scan-tab-camera"
+                                    role="tab"
+                                    aria-selected={scanMode === 'camera'}
+                                    aria-controls="scan-panel-camera"
+                                    type="button"
+                                    className={`mode-btn ${scanMode === 'camera' ? 'active' : ''}`}
+                                    onClick={() => setScanMode('camera')}
+                                >
+                                    <Camera size={16} aria-hidden="true" />
+                                    <span>Camera Scan</span>
+                                </button>
                             </div>
 
                             {scanMode === 'camera' ? (
                                 <div id="scan-panel-camera" role="tabpanel" aria-labelledby="scan-tab-camera" className="camera-scanner">
+                                    <div style={{ margin: '0 0 1rem 0', padding: '0.75rem', background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', fontSize: '0.85rem' }}>
+                                        <p style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
+                                            <Info size={16} style={{ flexShrink: 0, color: 'var(--accent-success)' }} />
+                                            <span>
+                                                <strong>Camera Scanning:</strong> Point your camera steadily at an InvisioVault QR code. Hold the code flat and well-lit. If the secret was encrypted with a password, you can enter it below to decrypt.
+                                            </span>
+                                        </p>
+                                    </div>
                                     <div className="camera-container">
                                         <video ref={videoRef} autoPlay playsInline muted allow="camera" className="camera-video" />
                                         <canvas ref={canvasRef} style={{ display: 'none' }} />
 
                                         {/* Dynamic Bounding Box Overlay */}
-                                        {cameraActive && boundingBox && videoRef.current && (
-                                            <svg
-                                                className="qr-overlay"
-                                                viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
-                                                style={{
-                                                    position: 'absolute',
-                                                    top: 0,
-                                                    left: 0,
-                                                    width: '100%',
-                                                    height: '100%',
-                                                    pointerEvents: 'none',
-                                                    zIndex: 10
-                                                }}
-                                            >
-                                                <path
-                                                    d={`M${boundingBox.topLeftCorner.x},${boundingBox.topLeftCorner.y} L${boundingBox.topRightCorner.x},${boundingBox.topRightCorner.y} L${boundingBox.bottomRightCorner.x},${boundingBox.bottomRightCorner.y} L${boundingBox.bottomLeftCorner.x},${boundingBox.bottomLeftCorner.y} Z`}
-                                                    fill="rgba(0, 255, 0, 0.2)"
-                                                    stroke="#00FF00"
-                                                    strokeWidth="4"
-                                                    strokeLinejoin="round"
-                                                />
-                                            </svg>
-                                        )}
+                                        {cameraActive && boundingBox && videoRef.current && (() => {
+                                            const boxWidth = Math.hypot(
+                                                boundingBox.topRightCorner.x - boundingBox.topLeftCorner.x,
+                                                boundingBox.topRightCorner.y - boundingBox.topLeftCorner.y
+                                            );
+                                            const isTooSmall = boxWidth < 180;
+                                            return (
+                                                <>
+                                                    <svg
+                                                        className="qr-overlay"
+                                                        viewBox={`0 0 ${videoRef.current.videoWidth} ${videoRef.current.videoHeight}`}
+                                                        style={{
+                                                            position: 'absolute',
+                                                            top: 0,
+                                                            left: 0,
+                                                            width: '100%',
+                                                            height: '100%',
+                                                            pointerEvents: 'none',
+                                                            zIndex: 10
+                                                        }}
+                                                    >
+                                                        <path
+                                                            d={`M${boundingBox.topLeftCorner.x},${boundingBox.topLeftCorner.y} L${boundingBox.topRightCorner.x},${boundingBox.topRightCorner.y} L${boundingBox.bottomRightCorner.x},${boundingBox.bottomRightCorner.y} L${boundingBox.bottomLeftCorner.x},${boundingBox.bottomLeftCorner.y} Z`}
+                                                            fill={isTooSmall ? "rgba(255, 165, 0, 0.2)" : "rgba(0, 255, 0, 0.2)"}
+                                                            stroke={isTooSmall ? "#FFA500" : "#00FF00"}
+                                                            strokeWidth="4"
+                                                            strokeLinejoin="round"
+                                                        />
+                                                    </svg>
+                                                    {isTooSmall && (
+                                                        <div style={{
+                                                            position: 'absolute',
+                                                            bottom: '16px',
+                                                            left: '50%',
+                                                            transform: 'translateX(-50%)',
+                                                            background: 'rgba(0, 0, 0, 0.8)',
+                                                            color: '#FFA500',
+                                                            padding: '6px 14px',
+                                                            borderRadius: '20px',
+                                                            fontSize: '0.82rem',
+                                                            fontWeight: '500',
+                                                            pointerEvents: 'none',
+                                                            zIndex: 12,
+                                                            border: '1px solid #FFA500'
+                                                        }}>
+                                                            Move closer for optical scanning
+                                                        </div>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
 
                                         {!cameraActive && !scanError && (
                                             <div className="camera-placeholder">
@@ -753,7 +915,7 @@ function QRCode() {
                                         <div className="scanning-status">
                                             <p style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                                                 <ScanLine size={16} />
-                                                <span>Extracting hidden data...</span>
+                                                <span>QR detected — Checking for hidden message…</span>
                                             </p>
                                         </div>
                                     )}
@@ -761,19 +923,21 @@ function QRCode() {
                                     {extractError && !scanError && !cameraError && (
                                         <div className="error-message" role="alert" style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
                                             <span>{extractError}</span>
-                                            <button
-                                                type="button"
-                                                className="mode-btn"
-                                                style={{ fontSize: '0.8rem', padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                                                onClick={() => {
-                                                    setExtractError('')
-                                                    if (clearCooldown) clearCooldown()
-                                                    resetScanner()
-                                                }}
-                                            >
-                                                <RotateCcw size={13} />
-                                                <span>Retry Scan</span>
-                                            </button>
+                                            {!pendingScan && (
+                                                <button
+                                                    type="button"
+                                                    className="mode-btn"
+                                                    style={{ fontSize: '0.8rem', padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                                                    onClick={() => {
+                                                        setExtractError('')
+                                                        if (clearCooldown) clearCooldown()
+                                                        resetScanner()
+                                                    }}
+                                                >
+                                                    <RotateCcw size={13} />
+                                                    <span>Retry Scan</span>
+                                                </button>
+                                            )}
                                         </div>
                                     )}
 
@@ -784,12 +948,11 @@ function QRCode() {
                                             <input
                                                 id="camera-password"
                                                 type={showExtractPassword ? "text" : "password"}
-                                                placeholder="Enter password before scanning"
+                                                placeholder={pendingScan ? "Enter password to unlock hidden secret" : "Enter password (if encrypted)"}
                                                 value={extractPassword}
                                                 onChange={(e) => {
                                                     setExtractPassword(e.target.value)
                                                     setExtractError('')
-                                                    if (clearCooldown) clearCooldown()
                                                 }}
                                             />
                                             {extractPassword && (
@@ -809,6 +972,34 @@ function QRCode() {
                                             )}
                                         </div>
                                         <small>Enter password before scanning if your QR is encrypted</small>
+                                        {pendingScan && (
+                                            <div style={{ marginTop: '0.75rem', display: 'flex', gap: '8px' }}>
+                                                <button
+                                                    type="button"
+                                                    className="submit-button"
+                                                    style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', margin: 0 }}
+                                                    disabled={extractLoading || !extractPassword.trim()}
+                                                    onClick={handleUnlockPendingScan}
+                                                >
+                                                    <Lock size={16} />
+                                                    <span>Unlock Secret</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="mode-btn"
+                                                    style={{ padding: '0 12px' }}
+                                                    onClick={() => {
+                                                        setPendingScan(null)
+                                                        setExtractError('')
+                                                        if (clearCooldown) clearCooldown()
+                                                        resetScanner()
+                                                    }}
+                                                >
+                                                    <RotateCcw size={14} />
+                                                    <span>Rescan</span>
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             ) : (
@@ -879,7 +1070,7 @@ function QRCode() {
                     ) : (
                         <div className="extracted-data">
                             <div className="success-icon">
-                                <CheckCircle2 size={48} strokeWidth={1.75} />
+                                <CheckCircle2 size={48} strokeWidth={1.75} color="var(--accent-success)" />
                             </div>
                             <h3>Data Extracted Successfully!</h3>
 
@@ -948,12 +1139,31 @@ function QRCode() {
                                     <div className="data-box" style={{ background: 'var(--bg-elevated)', borderStyle: 'dashed' }}>
                                         <p style={{ color: 'var(--text-tertiary)', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                             <Info size={16} style={{ flexShrink: 0 }} />
-                                            <span>No hidden data found. This appears to be a regular QR code without steganographic content.</span>
+                                            <span>No hidden secret message detected in this scan.</span>
                                         </p>
                                     </div>
-                                    <small style={{ display: 'block', marginTop: 'var(--space-2)', color: 'var(--text-tertiary)' }}>
-                                        Only QR codes generated with InvisioVault contain hidden messages.
-                                    </small>
+                                    <div style={{ marginTop: 'var(--space-2)', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                        <p style={{ margin: '4px 0' }}>
+                                            <strong>Did you create this QR code with InvisioVault?</strong>
+                                        </p>
+                                        <ul style={{ margin: '4px 0 8px 1.25rem', padding: 0, lineHeight: 1.5 }}>
+                                            <li>
+                                                If you scanned a digital screen, glare, moiré interference, or reflections can degrade subtle pixel luminance. Try reducing glare, holding steady, or use <strong>Upload Image</strong> with the original saved PNG.
+                                            </li>
+                                            <li>
+                                                If the QR code was <strong>password-protected</strong>, make sure the password was entered before scanning/extracting.
+                                            </li>
+                                        </ul>
+                                        <button
+                                            type="button"
+                                            className="mode-btn"
+                                            style={{ fontSize: '0.8rem', padding: '6px 12px', marginTop: '6px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                            onClick={() => { setScanMode('upload'); resetExtract(); }}
+                                        >
+                                            <Upload size={14} />
+                                            <span>Switch to Upload Image</span>
+                                        </button>
+                                    </div>
                                 </div>
                             )}
 
