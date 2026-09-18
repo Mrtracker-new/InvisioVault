@@ -82,7 +82,7 @@ def create_app(config_name='default'):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     
     # Setup logging
-    log_handlers = [logging.StreamHandler()]
+    log_handlers: list[logging.Handler] = [logging.StreamHandler()]
     log_file = app.config.get('LOG_FILE')
     if log_file:
         log_dir = os.path.dirname(os.path.abspath(log_file))
