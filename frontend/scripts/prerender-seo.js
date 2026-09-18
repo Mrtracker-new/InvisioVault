@@ -27,7 +27,7 @@ const routes = [
   {
     path: 'qr-code',
     title: 'Stealth QR Code Steganography & Scanner — Double-Agent Barcodes | InvisioVault',
-    description: 'Generate scannable QR codes containing public data for phone cameras and encrypted secrets hidden in URL fragments (#IVDATA:). Live camera scanner included.',
+    description: 'Generate stealth QR codes containing clean public data for phone cameras and encrypted secrets hidden in visual data modules. Live camera scanner included.',
     canonical: 'https://invisio-vault.vercel.app/qr-code',
     ogTitle: 'InvisioVault — Stealth QR Code Steganography',
     ogDescription: 'Double-agent QR codes: normal scanners open your public link; InvisioVault extracts the encrypted secret message.',

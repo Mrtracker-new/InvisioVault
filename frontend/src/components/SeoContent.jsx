@@ -69,11 +69,11 @@ export default function SeoContent() {
           <div className="seo-card-icon">
             <QrCode size={24} />
           </div>
-          <h3>Double-Agent QR Steganography</h3>
+          <h3>Stealth QR Code Steganography</h3>
           <p>
-            Standard phone camera scanners see an ordinary, benign URL. By encapsulating encrypted secrets within <strong>RFC 3986 URL fragments (<code>#IVDATA:</code>)</strong>, host servers never receive the secret in HTTP requests. Only InvisioVault isolates the fragment, derives keys with 480k PBKDF2 iterations, and decrypts the hidden message.
+            Standard phone camera scanners see an ordinary, benign URL. By embedding encrypted secrets directly into non-structural QR data modules via <strong>Visual Module Steganography</strong>, the public URL remains 100% clean with zero steganographic trace. InvisioVault also retains backward-compatible scanning for legacy URL fragments (<code>#IVDATA:</code>).
           </p>
-          <div className="seo-card-tag">RFC 3986 URI Fragment Shield</div>
+          <div className="seo-card-tag">Visual Module Structural Isolation</div>
         </article>
       </div>
 
@@ -122,7 +122,7 @@ export default function SeoContent() {
               </tr>
               <tr>
                 <td><strong>QR Barcode</strong></td>
-                <td>Fragment (#IVDATA:) / Visual Mask</td>
+                <td>Visual Module Masking / Legacy Fragment</td>
                 <td>Fernet (AES-128-CBC + HMAC-SHA256)</td>
                 <td>PBKDF2 (480,000 iter)</td>
                 <td>Up to 2,953 bytes (Version 40-L)</td>

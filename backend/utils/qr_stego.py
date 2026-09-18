@@ -16,12 +16,13 @@ Architectural Modes:
    - Structural modules (finder, separator, timing, alignment, format, version,
      dark module, quiet zone) are 100% isolated and preserved.
 
-2. Optimized Stream Mode (For larger payloads or direct URL transport):
-   - Hidden payload is compressed (zlib lv9), authenticated/encrypted (Fernet),
-     packaged into an IVQR container, and encoded in the URL fragment (#IVDATA:).
-   - Uses adaptive error correction (Level M or Q), ISO-compliant quiet zone
-     (border=4), and safe version limits (Version <= 22) to prevent the QR from
-     ballooning into unreadable 177x177 matrices.
+2. Legacy Stream Mode (Read/Extract-Only for backward compatibility):
+   - In earlier versions, secret payloads were compressed (zlib lv9), authenticated/
+     encrypted (Fernet), packaged into an IVQR container, and encoded in the URL
+     fragment (#IVDATA:).
+   - Generation has been retired in v2.0+ to eliminate URL fragment exposure in
+     scanners and link-preview crawlers. Parsing logic is preserved exclusively in
+     the extraction pipeline for backwards compatibility with legacy barcodes.
 
 3. Unified Extractor:
    - 8-stage extraction pipeline automatically recovers secrets from either

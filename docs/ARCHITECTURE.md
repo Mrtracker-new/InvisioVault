@@ -180,9 +180,13 @@ The resulting file functions flawlessly:
 
 ## 4. QR Code Steganography Engine
 
-InvisioVault provides two complementary QR steganographic modes tailored for different use cases.
+InvisioVault generates QR codes **exclusively using Visual Module Steganography (Mode 1)** to guarantee 100% plausible deniability. A secondary legacy scheme, **Stream Mode**, is supported strictly as a read/extract-only decoder for backwards compatibility.
 
-### 4.1 Mode 1: Visual Module Mode (Structural Isolation)
+> [!NOTE]
+> **Why does the UI only show Visual Mode for QR generation?**  
+> The generation interface does not include a mode toggle because **Visual Module Mode is the sole active generation mechanism**. Stream Mode generation was intentionally retired in v2.0+ to prevent URL fragment exposure (`#IVDATA:`) in camera apps and social link-preview crawlers. Stream decoding remains embedded in the scanner pipeline solely to support legacy barcodes without breaking backward compatibility.
+
+### 4.1 Active Generation Mode: Visual Module Mode (Structural Isolation)
 Encodes clean public data in the QR matrix while embedding the encrypted secret into non-critical data modules.
 - **Structural Module Preservation:** Standard QR decoders fail if functional patterns are modified. InvisioVault builds an explicit bitmask isolating:
   - Finder patterns ($7\times7$ corners) and separators
@@ -191,6 +195,7 @@ Encodes clean public data in the QR matrix while embedding the encrypted secret 
   - Format info modules and version info blocks
   - Quiet zone padding (4-module border)
 - Hidden bits are embedded only into non-structural data modules using Reed-Solomon redundancy parity blocks.
+- **Zero Decoded Footprint:** Any standard mobile camera or barcode reader reads only the pristine public text/URL without any fragment or steganographic trace.
 
 ---
 
@@ -202,7 +207,7 @@ https://public-domain.com/landing#IVDATA:eyJhbGciOiJGRVJORVQiLCJzYWx0Ijoi...
 ```
 
 **Generation Status in v2.0+:**
-- **Generation Retired:** Stream QR generation has been retired in production to eliminate URL fragment exposure in modern link-preview apps and ensure generated QR codes are 100% indistinguishable from standard barcodes. InvisioVault now generates QR codes exclusively using clean **Visual Module Steganography** (Mode 1).
+- **Generation Retired:** Stream QR generation has been permanently retired in production to eliminate URL fragment exposure in modern link-preview apps and ensure generated QR codes are 100% indistinguishable from standard barcodes. Calling `/api/qr/generate` with `method="stream"` explicitly returns an HTTP 400 error. InvisioVault now generates QR codes exclusively using clean **Visual Module Steganography** (Mode 1).
 - **Extraction Preserved:** Full Stream Mode decoding and `#IVDATA:` parsing remains active in `useQRScanner.js` and `/api/qr/scan` to preserve backwards compatibility when scanning legacy double-agent barcodes.
 
 ---

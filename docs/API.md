@@ -217,7 +217,7 @@ Creates a stealth QR code containing clean public data and a hidden secret embed
 - `fg_color` *(string, optional)*: QR module hex color (accepts alias `dark_color`, default `#000000`).
 - `bg_color` *(string, optional)*: QR background hex color (accepts alias `light_color`, default `#FFFFFF`).
 - `scale` *(integer, optional)*: Pixel scale factor 1–50 (default: 10).
-- `method` *(string, optional)*: Steganography mode (accepts alias `mode`, default `visual`).
+- `method` *(string, optional)*: Steganography mode (`visual` is the default and only valid generation option; `stream` generation was retired in v2.0+ to prevent URL fragment exposure and returns 400). Accepts legacy alias `mode`.
 - `logo` *(file, optional, multipart/form-data only)*: Center logo image.
 
 **Curl Example (JSON):**

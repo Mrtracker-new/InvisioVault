@@ -26,7 +26,7 @@ const ROUTE_METADATA = {
   qrcode: {
     path: '/qr-code',
     title: 'InvisioVault — Stealth QR Code Steganography & Scanner',
-    description: 'Generate double-agent QR codes with hidden encrypted URL fragments (#IVDATA:) and scan them in real time with your webcam.',
+    description: 'Generate stealth QR codes with hidden encrypted payloads via visual module steganography and scan them in real time with your webcam.',
   },
   docs: {
     path: '/docs',

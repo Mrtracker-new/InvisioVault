@@ -16,7 +16,7 @@ backend/
 │   ├── crypto_utils.py        # PBKDF2 key derivation & Fernet symmetric cryptography
 │   ├── steganography.py       # Sobel edge filter, LSB matching & wire format encoders
 │   ├── polyglot.py            # Dual-format binary concatenation & ZIP offset patching
-│   ├── qr_stego.py            # QR steganography (Visual & Stream modes)
+│   ├── qr_stego.py            # QR steganography (Visual generation & legacy Stream extraction)
 │   ├── qr_module_map.py       # Structural module isolation & masking
 │   ├── validators.py          # Magic-byte file validation & dimension limits
 │   └── cleanup.py             # Background ephemeral file cleaner thread

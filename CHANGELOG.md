@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [2.0.1] - 2026-09-18
 
 ### Added
-- **QR Code Steganography Suite:** Dual-mode QR generation and scanning using Visual Module Mode (structural isolation) and Stream Mode (URL fragment `#IVDATA:` scheme).
+- **QR Code Steganography Suite:** Visual Module Mode generation (structural isolation) with dual-mode scanning (supporting Visual Module Mode and legacy Stream Mode `#IVDATA:` scheme).
 - **Live Camera QR Scanner:** Real-time WebRTC camera scanner with dual-canvas contrast enhancement, 5-tier progressive hardware fallback, and in-memory zxing-cpp decoding.
 - **Deduplication Frame Cache:** In-memory SHA-256 frame cache reducing repeated frame extraction overhead during camera scans by 60–80%.
 - **Render Memory Envelope Hardening:** Deterministic concurrency semaphore (`_heavy_operation_semaphore`) and Gunicorn `post_fork` cleanup scheduler hook to eliminate OOM spikes on Render free-tier (512 MB).
