@@ -1,0 +1,14 @@
+title = "InvisioVault Gitleaks Configuration"
+
+[[allowlists]]
+description = "Ignore CI workflow definitions and test suites containing dummy test fixtures"
+paths = [
+    '''\.github/workflows/.*''',
+    '''backend/tests/.*''',
+]
+
+[[allowlists]]
+description = "Ignore dummy hex secret keys used strictly for automated testing"
+regexes = [
+    '''0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef''',
+]

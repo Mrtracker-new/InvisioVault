@@ -78,10 +78,9 @@ jobs:
       - name: Run Strict Pytest Suite with Coverage
         env:
           FLASK_ENV: testing
-          SECRET_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
           CORS_ORIGINS: "https://invisio-vault.vercel.app,http://localhost:5173"
         run: |
-          pytest -W error -W ignore::ResourceWarning -W ignore::pytest.PytestUnraisableExceptionWarning --cov=. --cov-report=term-missing --cov-report=xml
+          SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))') pytest -W error -W ignore::ResourceWarning -W ignore::pytest.PytestUnraisableExceptionWarning --cov=. --cov-report=term-missing --cov-report=xml
 
   # =========================================================================
   # 3. FRONTEND CI: Node 20, NPM Audit, ESLint & SEO Prerender Build
