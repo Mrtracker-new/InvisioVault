@@ -140,8 +140,17 @@ class ProductionConfig(Config):
     _cors_origins_raw = CORS_ORIGINS_RAW
 
 
+class TestingConfig(DevelopmentConfig):
+    """Testing configuration."""
+    TESTING = True
+    DEBUG = True
+    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads_test')
+
+
 config = {
     'development': DevelopmentConfig,
     'production': ProductionConfig,
+    'testing': TestingConfig,
     'default': DevelopmentConfig
 }
+

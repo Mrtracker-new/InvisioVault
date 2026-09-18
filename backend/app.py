@@ -25,11 +25,12 @@ def create_app(config_name='default'):
     app = Flask(__name__)
     
     # Load configuration
-    app.config.from_object(config[config_name])
-    config[config_name].init_app(app)  # This validates and sets CORS_ORIGINS
+    cfg_class = config.get(config_name, config['default'])
+    app.config.from_object(cfg_class)
+    cfg_class.init_app(app)  # This validates and sets CORS_ORIGINS
     
     # Apply MAX_CONTENT_LENGTH to Flask app (enables automatic request size validation)
-    app.config['MAX_CONTENT_LENGTH'] = config[config_name].MAX_CONTENT_LENGTH
+    app.config['MAX_CONTENT_LENGTH'] = cfg_class.MAX_CONTENT_LENGTH
     
     # Setup CORS (AFTER config initialization so CORS_ORIGINS is validated)
     cors_origins = list(app.config['CORS_ORIGINS'])

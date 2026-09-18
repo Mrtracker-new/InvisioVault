@@ -15,41 +15,61 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-psapi = ctypes.WinDLL('psapi', use_last_error=True)
+if sys.platform == 'win32':
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    psapi = ctypes.WinDLL('psapi', use_last_error=True)
 
-class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
-    _fields_ = [
-        ('cb', wintypes.DWORD),
-        ('PageFaultCount', wintypes.DWORD),
-        ('PeakWorkingSetSize', ctypes.c_size_t),
-        ('WorkingSetSize', ctypes.c_size_t),
-        ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
-        ('QuotaPagedPoolUsage', ctypes.c_size_t),
-        ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
-        ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
-        ('PagefileUsage', ctypes.c_size_t),
-        ('PeakPagefileUsage', ctypes.c_size_t),
-        ('PrivateUsage', ctypes.c_size_t),
-    ]
+    class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
+        _fields_ = [
+            ('cb', wintypes.DWORD),
+            ('PageFaultCount', wintypes.DWORD),
+            ('PeakWorkingSetSize', ctypes.c_size_t),
+            ('WorkingSetSize', ctypes.c_size_t),
+            ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
+            ('QuotaPagedPoolUsage', ctypes.c_size_t),
+            ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
+            ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+            ('PagefileUsage', ctypes.c_size_t),
+            ('PeakPagefileUsage', ctypes.c_size_t),
+            ('PrivateUsage', ctypes.c_size_t),
+        ]
 
-kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]
-psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]
+    psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
 
-def get_rss_mb():
-    counters = PROCESS_MEMORY_COUNTERS_EX()
-    counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
-    h = kernel32.GetCurrentProcess()
-    psapi.GetProcessMemoryInfo(h, ctypes.byref(counters), counters.cb)
-    return counters.WorkingSetSize / (1024 * 1024)
+    def get_rss_mb():
+        counters = PROCESS_MEMORY_COUNTERS_EX()
+        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
+        h = kernel32.GetCurrentProcess()
+        psapi.GetProcessMemoryInfo(h, ctypes.byref(counters), counters.cb)
+        return counters.WorkingSetSize / (1024 * 1024)
 
-def get_peak_rss_mb():
-    counters = PROCESS_MEMORY_COUNTERS_EX()
-    counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
-    h = kernel32.GetCurrentProcess()
-    psapi.GetProcessMemoryInfo(h, ctypes.byref(counters), counters.cb)
-    return counters.PeakWorkingSetSize / (1024 * 1024)
+    def get_peak_rss_mb():
+        counters = PROCESS_MEMORY_COUNTERS_EX()
+        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
+        h = kernel32.GetCurrentProcess()
+        psapi.GetProcessMemoryInfo(h, ctypes.byref(counters), counters.cb)
+        return counters.PeakWorkingSetSize / (1024 * 1024)
+else:
+    def get_rss_mb():
+        try:
+            with open('/proc/self/statm', 'r') as f:
+                pages = int(f.read().split()[1])
+                return (pages * os.sysconf('SC_PAGE_SIZE')) / (1024 * 1024)
+        except Exception:
+            try:
+                import resource
+                return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+            except Exception:
+                return 0.0
+
+    def get_peak_rss_mb():
+        try:
+            import resource
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+        except Exception:
+            return get_rss_mb()
 
 
 class MemoryRecoveryTests(unittest.TestCase):
