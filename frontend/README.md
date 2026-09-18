@@ -1,109 +1,97 @@
-# InvisioVault Frontend
+# InvisioVault Frontend Web Client
 
-The web client for InvisioVault, providing a secure, responsive interface for steganography, polyglot file creation, and QR code steganography. Built with React 19, Vite, and Lucide React.
+The production web interface for InvisioVault. Engineered with React 19, Vite, React Router, and Lucide React, featuring glassmorphic dark-mode aesthetics, accessible keyboard navigation (WCAG 2.1 AA), and high-performance client-side QR frame preprocessing.
 
-## Getting Started
+---
+
+## 1. Getting Started
 
 ### Prerequisites
-- Node.js (v18 or higher recommended)
-- npm (v9 or higher)
+- **Node.js:** v18.0.0 or higher
+- **npm:** v9.0.0 or higher
 
-### Installation
-Install project dependencies:
+### Local Development
 ```bash
+cd frontend
 npm install
-```
-
-### Development Server
-Start the local Vite development server:
-```bash
 npm run dev
 ```
-The application will be accessible at `https://localhost:5173` (HTTPS enabled via `basicSsl` for camera and QR scanner hardware permissions).
+*The local development server binds to `https://localhost:5173` using `@vitejs/plugin-basic-ssl` to enable secure browser context for WebRTC camera access.*
 
-### Production Build
-Build the optimized static assets:
+### Production Build & Pre-rendering
 ```bash
 npm run build
 ```
+*Runs `vite build` and executes `node scripts/prerender-seo.js` to generate pre-rendered static HTML snapshots for deep routes (`/steganography`, `/polyglot`, `/qr-code`, `/docs`).*
 
-### Preview Production Build
-Locally preview the production bundle:
+### Previewing Production Build
 ```bash
 npm run preview
 ```
 
-## Architecture & Tech Stack
+---
 
-- **React 19**: Component-based UI library
-- **Vite**: Modern frontend tooling and bundling
-- **Lucide React**: Vector SVG icon system
-- **Axios**: HTTP client for API communication
-- **jsQR**: In-browser QR code detection and extraction
-- **Vanilla CSS**: Custom design system with glassmorphic elements and dark mode variables
-
-## Directory Structure
+## 2. Directory Structure
 
 ```
-src/
-├── components/
-│   ├── CapacityIndicator.jsx   # Steganographic payload capacity calculations & indicators
-│   ├── ExtractFile.jsx         # Steganographic data extraction interface
-│   ├── HideFile.jsx            # LSB image steganography encoding interface
-│   ├── Polyglot.jsx            # Multi-format polyglot creation & inspection
-│   ├── QRCode.jsx              # QR code steganography generation and scanner
-│   ├── TutorialModal.jsx       # Interactive user guide and documentation modal
-│   └── WakeServerButton.jsx    # Backend health check and wake-up trigger
-├── config/
-│   └── api.js                  # API endpoint configuration
-├── hooks/
-│   └── useQRScanner.js         # Camera stream and QR frame decoding hook
-├── App.jsx                     # Root application container and navigation
-├── App.css                     # Global layout and navigation styling
-├── variables.css               # Design system tokens (colors, spacing, typography)
-└── main.jsx                    # Application entry point
+frontend/
+├── public/
+│   ├── .well-known/security.txt  # RFC 9116 security contact
+│   ├── humans.txt                # Author and team acknowledgments
+│   ├── robots.txt                # Crawler directives & search engine allowlists
+│   ├── sitemap.xml               # Canonical XML sitemap with deep paths
+│   └── og-image.png              # Optimized 1200x630 social preview card
+├── scripts/
+│   └── prerender-seo.js          # Build-time static snapshot generator for social bots
+├── src/
+│   ├── components/
+│   │   ├── CapacityIndicator.jsx # Dynamic LSB image capacity estimation
+│   │   ├── ExtractFile.jsx       # Stego extraction interface
+│   │   ├── FileDropzone.jsx      # Accessible drag & drop file upload
+│   │   ├── HideFile.jsx          # LSB image steganography encoding interface
+│   │   ├── Polyglot.jsx          # Universal polyglot creation and inspection
+│   │   ├── ProcessingIndicator.jsx # Processing animations & progress states
+│   │   ├── QRCode.jsx            # Double-agent QR generation & camera scanner
+│   │   ├── SeoContent.jsx        # Crawlable specs, FAQ accordion & warnings
+│   │   ├── StepProgress.jsx      # Multi-step progress visualizer
+│   │   ├── TutorialModal.jsx     # In-app guide and tutorial modal
+│   │   └── WakeServerButton.jsx  # Render backend health check & wake trigger
+│   ├── config/
+│   │   └── api.js                # Centralized backend endpoint configuration
+│   ├── hooks/
+│   │   └── useQRScanner.js       # Real-time WebRTC camera frame capture & jsQR loop
+│   ├── utils/
+│   │   └── apiError.js           # Safe client-side API error handling
+│   ├── App.jsx                   # Deep route manager & dynamic SEO metadata
+│   ├── App.css                   # Global layout styling
+│   ├── variables.css             # Design tokens (colors, typography, radii)
+│   └── main.jsx                  # React 19 entry point with BrowserRouter
+├── middleware.js                 # Vercel Edge Middleware for social bot redirection
+└── vercel.json                   # Vercel production headers and security rules
 ```
-
-## Development Guidelines
-
-1. **Component Standards**: Keep components modular, accessible, and aligned with the CSS design system in `variables.css`.
-2. **Icon Usage**: Use stroke-based icons from `lucide-react`. Maintain consistent sizing and alignment across controls.
-3. **API Integration**: All backend communications should resolve through the centralized API configuration in `config/api.js`.
-4. **Code Quality**: Run linting prior to committing changes:
-   ```bash
-   npm run lint
-   ```
-
-## Troubleshooting
-
-- **Dependency Issues**: If dependency resolution errors occur, clear the cache and reinstall:
-  ```bash
-  rm -rf node_modules package-lock.json
-  npm install
-  ```
-- **Vite Cache**: To clear the local Vite build cache:
-  ```bash
-  rm -rf node_modules/.vite
-  ```
-- **Backend Connectivity**: Ensure the InvisioVault backend is running and reachable at the configured `VITE_API_URL` or default `http://localhost:5000`.
-
-## Additional Resources
-
-- [React Documentation](https://react.dev)
-- [Vite Documentation](https://vite.dev)
-- [InvisioVault Architecture & API Documentation](../README.md)
 
 ---
 
-## Origin Story
+## 3. Deep Routing & SEO Architecture
 
-This was my first-ever repo. The original code was *ambitious*. I came back, learned cryptography properly, and rebuilt it from scratch. If you're a beginner: keep shipping. The rough early code is proof you're growing.
+InvisioVault uses **React Router** to map functional modes to clean, indexable URL paths:
+
+| Route Path | Tool View | Dynamic Document Title |
+|---|---|---|
+| `/` or `/steganography` | Image Steganography | `InvisioVault — Image Steganography Online` |
+| `/polyglot` | Universal Polyglot | `InvisioVault — Universal Polyglot File Generator` |
+| `/qr-code` | Stealth QR Code | `InvisioVault — Stealth QR Code Steganography & Scanner` |
+| `/docs` | Documentation Hub | `InvisioVault — Cryptographic Documentation & Architecture` |
+
+### Social Crawler Handling (Open Graph / Twitter Cards)
+Because client-side rendered apps update document `<head>` after Javascript execution, social crawlers (Twitter/X, Facebook, LinkedIn, Discord, Slack) do not execute React scripts:
+1. **Static Route Snapshots:** During `npm run build`, `scripts/prerender-seo.js` generates static HTML snapshots for `/steganography/index.html`, `/polyglot/index.html`, etc. with baked-in `<title>`, `<meta name="description">`, and `og:image` tags.
+2. **Vercel Edge Middleware (`middleware.js`):** Intercepts social scraper user agents and routes them directly to the pre-rendered HTML snapshot.
 
 ---
 
-<p align="center">
-  <strong>Built by <a href="https://rolan-rnr.netlify.app/">Rolan</a></strong><br/>
-  <a href="mailto:rolanlobo901@gmail.com">rolanlobo901@gmail.com</a> · <a href="https://github.com/Mrtracker-new">GitHub</a>
-</p>
+## 4. Design System & Accessibility Standards
 
-<p align="center"><sub>MIT License — use it, fork it, build something weird with it.</sub></p>
+- **Tokens:** All components consume CSS variables declared in `variables.css`.
+- **Keyboard Navigation (WCAG 2.1 AA):** All tabs implement WAI-ARIA tablist patterns with ArrowLeft/ArrowRight keyboard cycling, Skip to Main Content links, and high-contrast visible focus rings.
+- **Hardware Permissions:** Camera access is gated behind explicit user action and handled with graceful error boundaries if device permissions are denied.

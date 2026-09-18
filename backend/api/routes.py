@@ -468,7 +468,7 @@ def create_polyglot_file():
     try:
         # Validate request
         carrier_file = request.files.get('carrier')
-        file_to_hide = request.files.get('file')
+        file_to_hide = request.files.get('file') or request.files.get('payload')
         password = request.form.get('password') or None
 
         if not carrier_file or not carrier_file.filename:
@@ -593,7 +593,7 @@ def extract_from_polyglot_file():
     polyglot_path = None
     try:
         # Validate request
-        polyglot_file = request.files.get('file')
+        polyglot_file = request.files.get('file') or request.files.get('polyglot')
         password = request.form.get('password') or None
 
         if not polyglot_file or not polyglot_file.filename:
@@ -689,14 +689,21 @@ def generate_qr_code():
     """
     logo_path = None
     try:
-        # Validate request
-        public_data = request.form.get('public_data', '').strip()
-        secret_text = request.form.get('secret_text', '').strip()
-        password = request.form.get('password') or None
-        fg_color = request.form.get('fg_color', '#000000').strip()
-        bg_color = request.form.get('bg_color', '#FFFFFF').strip()
+        # Validate request — support application/json as well as multipart/form-data
+        if request.content_type and 'application/json' in request.content_type:
+            data = request.get_json(silent=True) or {}
+        else:
+            data = request.form
+
+        public_data = str(data.get('public_data') or '').strip()
+        secret_text = str(data.get('secret_text') or data.get('secret_message') or '').strip()
+        password = data.get('password') or None
+        fg_color = str(data.get('fg_color') or data.get('dark_color') or '#000000').strip()
+        bg_color = str(data.get('bg_color') or data.get('light_color') or '#FFFFFF').strip()
+        method = str(data.get('method') or data.get('mode') or 'visual').strip().lower()
+
         try:
-            scale = int(request.form.get('scale') or 10)
+            scale = int(data.get('scale') or 10)
         except (ValueError, TypeError):
             scale = 10
         
@@ -726,8 +733,8 @@ def generate_qr_code():
         if scale < 1 or scale > 50:
             scale = 10
         
-        # Handle optional logo
-        logo_file = request.files.get('logo')
+        # Handle optional logo (available in multipart/form-data)
+        logo_file = request.files.get('logo') if request.files else None
 
         upload_folder = current_app.config['UPLOAD_FOLDER']
         os.makedirs(upload_folder, exist_ok=True)
@@ -741,8 +748,6 @@ def generate_qr_code():
             except ValueError:
                 # If logo validation fails, continue without logo
                 logo_path = None
-
-        method = request.form.get('method', 'visual').strip().lower()
 
         # Generate QR code with steganography (visual mode only)
         output_filename = f"{secrets.token_urlsafe(16)}_qr.png"

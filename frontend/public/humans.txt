@@ -1,0 +1,17 @@
+/* AUTHOR & CREATOR */
+Creator & Architect: Rolan (RNR)
+Contact: rolanlobo901@gmail.com
+Website: https://rolan-rnr.netlify.app/
+GitHub: https://github.com/Mrtracker-new
+Twitter/X: https://x.com/Rolan_RNR
+
+/* THANKS */
+The open-source cryptographic and Python communities (Cryptography.io, Pillow, Segno, ZXing-C++, PyZipper).
+
+/* SITE */
+Last update: 2026-09-18
+Standards: HTML5, CSS3, ES2024, WebRTC, WCAG 2.1 AA
+Software: React 19, Vite, Flask, Gunicorn, Lucide Icons
+Components: Steganography Engine, Universal Polyglot Engine, QR Steganography
+Backend: Stateless, zero-retention ephemeral processing
+Hosting: Vercel (Frontend), Render (Backend)

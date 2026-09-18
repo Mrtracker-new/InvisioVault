@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/prerender-seo.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -14,7 +14,8 @@
     "jsqr": "^1.4.0",
     "lucide-react": "^1.45.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

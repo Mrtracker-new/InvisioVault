@@ -1,0 +1,519 @@
+openapi: 3.0.3
+info:
+  title: InvisioVault REST API
+  description: |
+    Production REST API for InvisioVault: secure file hiding via edge-guided LSB steganography, universal polyglot generation, and stealth QR code embedding.
+  version: 2.0.1
+  contact:
+    name: Rolan (RNR)
+    email: rolanlobo901@gmail.com
+    url: https://rolan-rnr.netlify.app/
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://invisiovault-backend.onrender.com/api
+    description: Production Render API
+  - url: http://localhost:5000/api
+    description: Local Development Server
+
+paths:
+  /health:
+    get:
+      summary: Health Check
+      description: Returns API blueprint health status. Exempt from rate limiting. Note that container orchestrators may also query the root service probe at `GET /`.
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  message:
+                    type: string
+                    example: InvisioVault API is running
+
+  /calculate-capacity:
+    post:
+      summary: Calculate Steganographic Capacity
+      description: Reads image dimensions directly from file headers to compute available LSB byte capacity without full image decoding.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Carrier image (PNG, JPG, BMP)
+      responses:
+        '200':
+          description: Calculated capacity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalCapacityBytes:
+                    type: integer
+                    example: 1572864
+                  totalCapacityFormatted:
+                    type: string
+                    example: 1.5 MB
+        '400':
+          description: Invalid image or missing file
+
+  /hide:
+    post:
+      summary: Hide File in Image (LSB Steganography)
+      description: Encodes a file or text payload into carrier image pixels using Sobel edge guidance, Reed-Solomon ECC, and optional Fernet encryption.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: Host carrier image (PNG, JPG, BMP). Max 10 MB.
+                file:
+                  type: string
+                  format: binary
+                  description: File payload to conceal. Max 50 MB.
+                text:
+                  type: string
+                  description: Plain text payload to conceal (if file is omitted).
+                password:
+                  type: string
+                  minLength: 8
+                  description: Passphrase for PBKDF2 (480k iter) + Fernet encryption.
+      responses:
+        '200':
+          description: Payload embedded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: File hidden successfully
+                  download_id:
+                    type: string
+                    example: 9a7b3c2d4e5f6a7b8c9d0e1f2a3b4c5d.png
+
+  /download/{download_id}:
+    get:
+      summary: Download Stego File
+      description: Streams the processed steganographic image directly from disk storage without memory duplication.
+      parameters:
+        - name: download_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Processed steganographic image file stream
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+
+  /extract:
+    post:
+      summary: Extract File from Stego Image
+      description: Recovers and decrypts hidden payloads embedded inside steganographic carrier images.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                image:
+                  type: string
+                  format: binary
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Extracted file stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /polyglot/create:
+    post:
+      summary: Create Polyglot File
+      description: Merges a carrier file (image, PDF, audio, video) with a hidden payload into a dual-format file with in-memory ZIP offset patching.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - carrier
+              properties:
+                carrier:
+                  type: string
+                  format: binary
+                  description: Visible host carrier file. Max 10 MB.
+                file:
+                  type: string
+                  format: binary
+                  description: Secret file to conceal within the carrier. Max 50 MB.
+                payload:
+                  type: string
+                  format: binary
+                  deprecated: true
+                  description: "Legacy alias for `file`. Prefer `file`."
+                password:
+                  type: string
+                  description: Optional passphrase for encrypted ZIP packaging.
+      responses:
+        '200':
+          description: Polyglot file generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Polyglot file created successfully
+                  download_id:
+                    type: string
+                    example: e4f5a6b71c2d3e4f5a6b7c8d9e0f1a2b.pdf
+
+  /polyglot/download/{download_id}:
+    get:
+      summary: Download Polyglot File
+      description: Streams the generated polyglot file directly from disk storage.
+      parameters:
+        - name: download_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dual-format polyglot file stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /polyglot/extract:
+    post:
+      summary: Extract from Polyglot File
+      description: Extracts embedded archive files from a dual-format polyglot carrier.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Polyglot file to extract from.
+                polyglot:
+                  type: string
+                  format: binary
+                  deprecated: true
+                  description: "Legacy alias for `file`. Prefer `file`."
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Extracted secret file stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+  /qr/generate:
+    post:
+      summary: Generate Stealth QR Code
+      description: Generates a QR code with public data and a hidden secret embedded via Visual Module Steganography. Supports both application/json and multipart/form-data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - public_data
+                - secret_text
+              properties:
+                public_data:
+                  type: string
+                  description: Visible URL or public message.
+                  example: https://github.com/Mrtracker-new/InvisioVault
+                secret_text:
+                  type: string
+                  description: Confidential payload to hide within QR matrix modules.
+                  example: Master encryption seed
+                secret_message:
+                  type: string
+                  deprecated: true
+                  description: "Legacy alias for `secret_text`. Prefer `secret_text`."
+                password:
+                  type: string
+                  description: Optional passphrase for Fernet authenticated encryption (min 8 characters).
+                method:
+                  type: string
+                  enum: [visual]
+                  default: visual
+                  description: Steganography mode (visual module embedding).
+                mode:
+                  type: string
+                  deprecated: true
+                  description: "Legacy alias for `method`. Prefer `method`."
+                fg_color:
+                  type: string
+                  default: "#000000"
+                  example: "#000000"
+                dark_color:
+                  type: string
+                  deprecated: true
+                  description: "Legacy alias for `fg_color`. Prefer `fg_color`."
+                bg_color:
+                  type: string
+                  default: "#ffffff"
+                  example: "#ffffff"
+                light_color:
+                  type: string
+                  deprecated: true
+                  description: "Legacy alias for `bg_color`. Prefer `bg_color`."
+                scale:
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+                  default: 10
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - public_data
+                - secret_text
+              properties:
+                public_data:
+                  type: string
+                secret_text:
+                  type: string
+                secret_message:
+                  type: string
+                  deprecated: true
+                password:
+                  type: string
+                method:
+                  type: string
+                  enum: [visual]
+                  default: visual
+                mode:
+                  type: string
+                  deprecated: true
+                fg_color:
+                  type: string
+                  default: "#000000"
+                dark_color:
+                  type: string
+                  deprecated: true
+                bg_color:
+                  type: string
+                  default: "#ffffff"
+                light_color:
+                  type: string
+                  deprecated: true
+                scale:
+                  type: integer
+                  default: 10
+                logo:
+                  type: string
+                  format: binary
+                  description: Optional logo image to composite into center of QR code.
+      responses:
+        '200':
+          description: QR Code generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: QR code generated successfully
+                  download_id:
+                    type: string
+                    example: d1c2b3a45e6f7a8b9c0d1e2f3a4b5c6d_qr.png
+
+  /qr/download/{download_id}:
+    get:
+      summary: Download Generated QR Code Image
+      description: Streams the generated QR barcode image directly from disk storage.
+      parameters:
+        - name: download_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PNG QR Code stream
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+
+  /qr/scan:
+    post:
+      summary: Scan & Extract QR Code
+      description: Decodes visible public barcode data and recovers steganographically concealed payloads.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                image:
+                  type: string
+                  format: binary
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Scanned and decrypted QR data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  public_data:
+                    type: string
+                  secret_message:
+                    type: string
+                  mode:
+                    type: string
+
+  /qr/extract:
+    post:
+      summary: Extract Secret from Raw Decoded QR String
+      description: Direct extraction endpoint for recovering secrets from pre-scanned QR strings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - qr_text
+              properties:
+                qr_text:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  public_data:
+                    type: string
+                  secret_message:
+                    type: string
+
+  /qr/capacity:
+    post:
+      summary: Compute QR Code Capacity
+      description: Computes maximum hidden steganographic capacity based on public data length.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - public_data
+              properties:
+                public_data:
+                  type: string
+                mode:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max_secret_bytes:
+                    type: integer
+                  safe_recommended_bytes:
+                    type: integer
+
+  /qr/detect:
+    post:
+      summary: Fast Frame Detection for Camera Scanner
+      description: High-speed barcode detection endpoint with in-memory SHA-256 deduplication cache.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detected:
+                    type: boolean
+                  text:
+                    type: string

@@ -1,69 +1,77 @@
 <p align="center">
-  <img src="frontend/public/InvisioVault.png" alt="InvisioVault" width="160"/>
+  <img src="frontend/public/InvisioVault.png" alt="InvisioVault Logo" width="160"/>
 </p>
 
 <h1 align="center">InvisioVault</h1>
 
 <p align="center">
-  Hide files inside images. Create files that double as archives. Smuggle messages through QR codes.<br/>
-  <strong>Steganography toolkit built with Python and React.</strong>
+  <strong>Steganography, Universal Polyglots & Stealth QR Codes</strong><br/>
+  Conceal confidential files inside images, documents, audio, and scannable QR codes with authenticated encryption.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.10+-3776ab?style=flat-square&logo=python&logoColor=white"/>
-  <img src="https://img.shields.io/badge/react-19-61dafb?style=flat-square&logo=react&logoColor=black"/>
-  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"/>
-  <br/><br/>
-  <a href="https://invisio-vault.vercel.app">Live Demo</a>
+  <a href="https://invisio-vault.vercel.app"><img src="https://img.shields.io/badge/Live_Demo-Vercel-black?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo"/></a>
+  <img src="https://img.shields.io/badge/Python-3.10+-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python Version"/>
+  <img src="https://img.shields.io/badge/React-19-61dafb?style=for-the-badge&logo=react&logoColor=black" alt="React 19"/>
+  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License"/>
+  <img src="https://img.shields.io/badge/Encryption-Fernet_AES--128--CBC-orange?style=for-the-badge" alt="Fernet Encryption"/>
+  <img src="https://img.shields.io/badge/KDF-PBKDF2_480k-green?style=for-the-badge" alt="PBKDF2 480k iterations"/>
 </p>
 
 ---
 
-## What It Does
+## Overview
 
-**Steganography** — Hide a file or text inside an image by embedding data into the least-significant bits of each pixel. The output looks identical to the original. Supports PNG, JPEG, and BMP carriers with a capacity indicator so you know what fits.
+InvisioVault is an open-source cybersecurity and steganography toolkit. It allows you to conceal encrypted files inside ordinary carrier files (images, PDFs, media, and QR codes) with zero visual distortion or header corruption.
 
-**Polyglot Files** — Create a single file that works as two formats. Open it normally and it's an image. Rename to `.zip` and your hidden files appear. Works with any carrier type — images, PDFs, videos, audio. No manual zipping needed.
+---
 
-**QR Code Steganography** — Generate QR codes with a hidden payload baked into the URL fragment. Standard scanners see a normal link. InvisioVault recovers the secret. Survives screenshots, prints, and camera recapture.
+## Features
 
-All three modes support optional password-protected encryption.
+- **Image Steganography:** Embeds data into high-entropy image textures using Sobel edge guidance and randomized LSB matching (±1), paired with Reed-Solomon error correction to defeat statistical steganalysis.
+- **Universal Polyglots:** Merges files so they open normally as images, videos, or PDFs, but extract as fully valid archives when opened in 7-Zip, WinRAR, or Archive Utility.
+- **Stealth QR Codes:** Conceals encrypted payloads inside standard-looking QR codes that scan harmlessly with everyday camera apps while decrypting inside InvisioVault.
 
 ---
 
 ## Quick Start
 
-**Windows** — just run `run.bat`.
+### Windows
 
-**Everything else:**
+Run `run.bat` to launch both the backend and frontend automatically.
 
-```bash
-# Backend
-cd backend && pip install -r requirements.txt && python app.py
+### Manual Setup
 
-# Frontend (new terminal)
-cd frontend && npm install && npm run dev
-```
+1. **Backend (Python 3.10+):**
+   ```bash
+   cd backend
+   python -m venv .venv
+   # Windows: .venv\Scripts\activate | Linux/macOS: source .venv/bin/activate
+   pip install -r requirements.txt
+   python app.py
+   ```
 
-Open [localhost:5173](http://localhost:5173).
+2. **Frontend (Node 18+):**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
 ---
 
-## Security
+## Documentation
 
-| | |
+Comprehensive guides and technical specifications are available in the [`docs/`](docs/) directory:
+
+| Document | Focus |
 |---|---|
-| **Encryption** | Fernet (AES-128-CBC + HMAC-SHA256), PBKDF2 at 480k iterations, AES-256 for polyglot ZIPs |
-| **Validation** | Magic-byte verification, Pillow structural parsing, 100 MP pixel cap |
-| **Protection** | Rate limiting, path traversal prevention, CSP/HSTS headers, auto temp-file cleanup |
-
----
-
-## Tech Stack
-
-**Backend** — Flask, Gunicorn, Pillow, cryptography, segno, zxing-cpp
-
-**Frontend** — React 19, Vite, Axios
+| [Architecture & Cryptography](docs/ARCHITECTURE.md) | Wire formats, Sobel filter mathematics, and binary offset algorithms. |
+| [REST API Reference](docs/API.md) | Endpoint specifications, payloads, and examples. |
+| [OpenAPI Specification](docs/openapi.yaml) | Full OpenAPI 3.0.3 schema definition. |
+| [Security Policy](SECURITY.md) | Threat model, responsible disclosure, and cryptographic guarantees. |
+| [Contributing Guidelines](CONTRIBUTING.md) | Local setup, standards, and pull request workflow. |
+| [Changelog](CHANGELOG.md) | Version history and release notes. |
 
 ---
 
@@ -73,9 +81,11 @@ This was my first-ever repo. The original code was *ambitious*. I came back, lea
 
 ---
 
-<p align="center">
-  <strong>Built by <a href="https://rolan-rnr.netlify.app/">Rolan</a></strong><br/>
-  <a href="mailto:rolanlobo901@gmail.com">rolanlobo901@gmail.com</a> · <a href="https://github.com/Mrtracker-new">GitHub</a>
-</p>
+## Author
 
-<p align="center"><sub>MIT License — use it, fork it, build something weird with it.</sub></p>
+Created and maintained by **[Rolan (RNR)](https://rolan-rnr.netlify.app/)**
+- GitHub: [@Mrtracker-new](https://github.com/Mrtracker-new)
+- Email: [rolanlobo901@gmail.com](mailto:rolanlobo901@gmail.com)
+- Twitter/X: [@Rolan_RNR](https://x.com/Rolan_RNR)
+
+Distributed under the [MIT License](LICENSE).

@@ -1,4 +1,6 @@
 """Application configuration."""
+from __future__ import annotations
+
 import os
 import secrets
 import logging
@@ -10,8 +12,8 @@ class Config:
     """Base configuration."""
     
     # Flask
-    SECRET_KEY = os.getenv('SECRET_KEY')
-    DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+    SECRET_KEY: str | None = os.getenv('SECRET_KEY')
+    DEBUG: bool = os.getenv('DEBUG', 'False').lower() == 'true'
     
     @classmethod
     def validate_secret_key(cls):
@@ -70,8 +72,9 @@ class Config:
     
     # File size limits (in bytes)
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB - for carrier images
-    MAX_HIDEABLE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB    # File upload limits - increased to 50MB for phone photos
-    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50 MB - total request limit
+    MAX_HIDEABLE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB - upload limit
+    _env_max_content = int(os.getenv('MAX_CONTENT_LENGTH', str(50 * 1024 * 1024)))
+    MAX_CONTENT_LENGTH = min(_env_max_content, 100 * 1024 * 1024)  # 50 MB default, capped at 100 MB guard
     SMALL_OBJECT_THRESHOLD_BYTES = int(os.getenv('SMALL_OBJECT_THRESHOLD_BYTES', '1048576'))  # 1 MB
     MAX_PIXEL_COUNT = int(os.getenv('MAX_PIXEL_COUNT', '25000000'))  # 25 megapixels
     
@@ -119,8 +122,7 @@ class DevelopmentConfig(Config):
     _cors_origins_raw = CORS_ORIGINS_RAW
     
     # Auto-generate secret key for development if not set
-    if not Config.SECRET_KEY:
-        SECRET_KEY = secrets.token_hex(32)
+    SECRET_KEY: str | None = Config.SECRET_KEY or secrets.token_hex(32)
 
 
 class ProductionConfig(Config):

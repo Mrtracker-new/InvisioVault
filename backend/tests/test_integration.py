@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import unittest
 import unittest.mock
+import warnings
 import zipfile
 from PIL import Image
 import numpy as np
@@ -682,8 +683,10 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
         buf.seek(0)
         fs = FileStorage(stream=buf, filename="oversized.png", content_type="image/png")
 
-        with self.assertRaises(ValueError) as ctx:
-            validate_image(fs)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+            with self.assertRaises(ValueError) as ctx:
+                validate_image(fs)
         self.assertIn("too large", str(ctx.exception).lower())
 
     def test_path_traversal_protection(self):
@@ -715,6 +718,72 @@ class InvisioVaultIntegrationTests(unittest.TestCase):
             content_type="multipart/form-data"
         )
         self.assertEqual(res.status_code, 400)
+
+    def test_polyglot_payload_alias_and_response_schema(self):
+        """Verify /api/polyglot/create accepts 'payload' as well as 'file' and returns download_id."""
+        carrier_buf = io.BytesIO(b"%PDF-1.4 header text data...")
+        payload_buf = io.BytesIO(b"Confidential payload content to hide")
+
+        # Test 'payload' field name per OpenAPI spec
+        res = self.client.post(
+            "/api/polyglot/create",
+            data={
+                "carrier": (carrier_buf, "document.pdf"),
+                "payload": (payload_buf, "secret.txt")
+            },
+            content_type="multipart/form-data"
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertIn("download_id", data)
+        download_id = data["download_id"]
+
+        # Verify download streams cleanly
+        res_dl = self.client.get(f"/api/polyglot/download/{download_id}")
+        self.assertEqual(res_dl.status_code, 200)
+
+        # Verify /polyglot/extract works with 'polyglot' field name
+        poly_file = io.BytesIO(res_dl.data)
+        res_extract = self.client.post(
+            "/api/polyglot/extract",
+            data={
+                "polyglot": (poly_file, "downloaded_polyglot.pdf")
+            },
+            content_type="multipart/form-data"
+        )
+        self.assertEqual(res_extract.status_code, 200)
+        self.assertEqual(res_extract.data, b"Confidential payload content to hide")
+
+    def test_qr_generate_json_and_alias_fields(self):
+        """Verify /api/qr/generate accepts application/json and supports alias parameter names."""
+        import json
+
+        # Send JSON with OpenAPI alias fields: secret_message, dark_color, light_color, mode
+        req_payload = {
+            "public_data": "https://rolan-rnr.netlify.app/",
+            "secret_message": "Test secret via JSON and aliases",
+            "dark_color": "#111111",
+            "light_color": "#EEEEEE",
+            "mode": "visual",
+            "scale": 10
+        }
+
+        res = self.client.post(
+            "/api/qr/generate",
+            data=json.dumps(req_payload),
+            content_type="application/json"
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertIn("download_id", data)
+        download_id = data["download_id"]
+
+        # Verify QR image download streams cleanly
+        res_dl = self.client.get(f"/api/qr/download/{download_id}")
+        self.assertEqual(res_dl.status_code, 200)
+        self.assertEqual(res_dl.mimetype, "image/png")
 
 
 if __name__ == '__main__':

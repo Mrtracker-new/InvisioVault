@@ -235,7 +235,9 @@ function QRCode() {
             if (typeof navigator !== 'undefined' && navigator.vibrate) {
                 try {
                     navigator.vibrate(50)
-                } catch (e) {}
+                } catch {
+                    // Ignore vibration errors if unsupported or blocked
+                }
             }
         } catch (err) {
             const scanId = err.response?.data?.cameraScanId || 'unknown'
@@ -312,7 +314,9 @@ function QRCode() {
             if (typeof navigator !== 'undefined' && navigator.vibrate) {
                 try {
                     navigator.vibrate(50)
-                } catch (e) {}
+                } catch {
+                    // Ignore vibration errors if unsupported or blocked
+                }
             }
         } catch (err) {
             console.error('[QRCode Component] Unlock error:', err)
@@ -495,7 +499,9 @@ function QRCode() {
             if (typeof navigator !== 'undefined' && navigator.vibrate) {
                 try {
                     navigator.vibrate(50)
-                } catch (e) {}
+                } catch {
+                    // Ignore vibration errors if unsupported or blocked
+                }
             }
         } catch (err) {
             const errorMsg = err.response?.data?.error || 'An error occurred while scanning the QR code'

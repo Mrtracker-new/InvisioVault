@@ -1,6 +1,58 @@
+# InvisioVault robots.txt
+# https://invisio-vault.vercel.app/
+
+# Primary Search Engine Crawlers
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+# Social Media Scrapers (Open Graph & Twitter Cards)
+User-agent: Twitterbot
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: LinkedInBot
+Allow: /
+
+User-agent: Discordbot
+Allow: /
+
+User-agent: Slackbot
+Allow: /
+
+User-agent: TelegramBot
+Allow: /
+
+User-agent: WhatsApp
+Allow: /
+
+# Rate-limit uncredited AI ingestion scrapers on proprietary architecture docs
+User-agent: CCBot
+Disallow: /docs/
+
+User-agent: GPTBot
+Disallow: /docs/
+
+User-agent: ClaudeBot
+Disallow: /docs/
+
+User-agent: Bytespider
+Disallow: /docs/
+
+# General crawler policy
 User-agent: *
 Allow: /
 
-# Sitemap and Host directives
+# Sitemap & Host declarations
 Sitemap: https://invisio-vault.vercel.app/sitemap.xml
 Host: invisio-vault.vercel.app
