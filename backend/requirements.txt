@@ -5,7 +5,7 @@ Pillow==12.3.0
 Werkzeug==3.1.8
 python-dotenv==1.0.1
 cryptography==49.0.0
-pyzipper==0.3.6
+pyzipper==0.4.0
 gunicorn==26.0.0
 segno==1.6.1
 zxing-cpp==2.3.0

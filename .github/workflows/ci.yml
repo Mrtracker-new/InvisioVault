@@ -1,0 +1,121 @@
+name: InvisioVault CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+# Cancel redundant in-progress runs on PRs/feature branches, but preserve runs on main/master
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+# Enforce least-privilege permissions across all jobs by default
+permissions:
+  contents: read
+
+jobs:
+  # =========================================================================
+  # 1. SECURITY SCAN: Full Git History Secret Detection
+  # =========================================================================
+  security-scan:
+    name: Secret Leak Detection (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      # Shallow clones miss historical secret commits; fetch-depth: 0 fetches all commits & tags
+      - name: Checkout Full Repository History
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Scan entire git commit history for leaked API keys, tokens, and credentials
+      - name: Run Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required for organization accounts; optional for personal repos
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # =========================================================================
+  # 2. BACKEND CI: Python 3.13, CVE Audit & Strict Pytest with Coverage
+  # =========================================================================
+  backend-ci:
+    name: Backend CI (Python 3.13 & Security Audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Setup Python 3.13 with native aggressive pip caching scoped to backend/requirements.txt
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Upgrade Pip & Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pip-audit
+
+      # Audit installed Python dependencies against OSV and PyPA vulnerability databases
+      - name: Run Dependency Vulnerability Audit (pip-audit)
+        run: |
+          pip-audit -r requirements.txt
+
+      # Execute pytest suite in strict mode (-W error) with test-runner logging suppressions
+      # as configured in backend/pytest.ini, and generate terminal + XML coverage reports
+      - name: Run Strict Pytest Suite with Coverage
+        env:
+          FLASK_ENV: testing
+          SECRET_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          CORS_ORIGINS: "https://invisio-vault.vercel.app,http://localhost:5173"
+        run: |
+          pytest -W error -W ignore::ResourceWarning -W ignore::pytest.PytestUnraisableExceptionWarning --cov=. --cov-report=term-missing --cov-report=xml
+
+  # =========================================================================
+  # 3. FRONTEND CI: Node 20, NPM Audit, ESLint & SEO Prerender Build
+  # =========================================================================
+  frontend-ci:
+    name: Frontend CI (Node 20 & Audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Setup Node.js 20 with aggressive npm package cache scoped to frontend/package-lock.json
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # Perform clean, deterministic dependency installation from lockfile
+      - name: Install Dependencies
+        run: npm ci
+
+      # Fail pipeline if high or critical vulnerabilities exist in dependency tree
+      - name: Run Security Audit (Fail on High/Critical CVEs)
+        run: npm audit --audit-level=high
+
+      # Enforce code style and syntax standards via ESLint
+      - name: Run ESLint
+        run: npm run lint
+
+      # Execute Vite bundle build AND custom SEO prerender assertion script (scripts/prerender-seo.js)
+      - name: Build Frontend & Assert SEO Prerendering
+        run: npm run build
